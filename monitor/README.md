@@ -6,7 +6,8 @@ Python 3.10 or newer, standard library only. On Windows the command is `py`.
 
 1. From the repo root, start the monitor: `py monitor/src/main.py --sim-host`
    (`--sim-host` adds a simulated clock, speaker and disk, with demo buttons on the page. Leave it off to use the real clock and speaker.)
-2. In a second window start two simulated cabinets: `py adc/src/adc_sim.py --count 2`
+2. In a second window start a cabinet: `py adc/src/adc_main.py` (panel on http://127.0.0.1:8090, see `adc/src/README.md`),
+   or two command-line simulated cabinets: `py adc/src/adc_sim.py --count 2`
 3. Open http://127.0.0.1:8080
 
 Options: `--port` (cabinet port, default 9000), `--ui-port` (default 8080), `--data` (folder for saved state and log), `--lan`.
@@ -19,4 +20,4 @@ M1 `link`, M2 `protocol`, M3 `gateway`, M4 `health`, M5 `orders`, M6 `inventory`
 
 ## Tests
 
-`py -m unittest discover -s monitor/tests` (21 tests, about 12 s)
+`py -m unittest discover -s monitor/tests` (22 tests, about 12 s)

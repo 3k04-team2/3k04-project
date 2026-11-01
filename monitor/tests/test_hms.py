@@ -136,6 +136,31 @@ class SystemTests(unittest.TestCase):
         self.assertFalse(self.host.tone_is_on())
         self.assertIsNotNone(oid)
 
+    def test_adc_login_checked_by_hms(self):
+        results = []
+        plain = self.adc._handle
+
+        def handle(line):
+            msg = MessageCodec().decode(line)
+            if msg.type != "AUTH_RESULT":
+                return plain(line)
+            results.append(msg.body)
+            self.adc.send("ACK", {"ack": msg.seq})
+        self.adc._handle = handle
+        self.adc.send("AUTH_REQUEST", {"request": 1, "user": "nurse1", "password": demo_password("nurse1")})
+        self.adc.send("AUTH_REQUEST", {"request": 2, "user": "nurse1", "password": "wrong"})
+        self.assertTrue(wait_for(lambda: len(results) == 2))
+        by_id = {r["request"]: r for r in results}
+        self.assertEqual((by_id[1]["ok"], by_id[1]["role"]), (True, "Nurse"))
+        self.assertFalse(by_id[2]["ok"])
+        types = [e["type"] for e in self.sys.log.query({})]
+        self.assertIn("ADC_LOGIN", types)
+        self.assertIn("ADC_LOGIN_FAILED", types)
+        # the ADC owns its lockout, so failures there never lock the HMS device
+        for _ in range(6):
+            self.assertIsNone(self.sys.access.verify("admin1", "wrong", "ADC-1"))
+        self.assertEqual(self.sys.access.verify("admin1", demo_password("admin1"), "ADC-1"), "Administrator")
+
     def test_corrupt_frame_logged_and_refused(self):
         self.adc.command(["corrupt"])
         self.assertTrue(wait_for(lambda: any(e["type"] == "REJECTED" for e in self.sys.log.query({}))))

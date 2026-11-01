@@ -18,7 +18,7 @@ from hms.host import HostPlatform, SimulatedHost
 from hms.inventory import InventoryTracker
 from hms.link import AdcLink
 from hms.orders import OrderManager
-from hms.protocol import MessageCodec
+from hms.protocol import Message, MessageCodec
 from hms.store import LogStore, StateStore
 from hms.ui import WebApp
 from hms.ui.app import PAGE
@@ -98,6 +98,7 @@ class System:
         g.subscribe("EVENT", self.inventory.onEvent)
         g.subscribe("INVENTORY", self.inventory.onInventory)
         g.subscribe("ORDER_STATUS", self.orders.onOrderStatus)
+        g.subscribe("AUTH_REQUEST", self._on_auth_request)
         self.health.onStateChange(self.orders.onAdcStateChange)
 
     def _on_alarm(self, adc, msg):
@@ -105,6 +106,20 @@ class System:
         self.alarms.raise_(b.get("alarm", "ADC_ALARM"), b.get("severity", "warning"), adc,
                            b.get("text", ""))
         self.health.onAlarm(adc, msg)
+
+    def _on_auth_request(self, adc, msg):
+        # A login typed at the ADC: check it here and answer with AUTH_RESULT.
+        b = msg.body
+
+        def work():
+            role = self.access.verify(b.get("user"), b.get("password"), adc)
+            reply = Message("AUTH_RESULT", body={"request": b.get("request", 0), "user": str(b.get("user", "")),
+                                                 "ok": role is not None, "role": role or ""})
+            try:
+                self.gateway.send(adc, reply)
+            except Exception as e:
+                self.log.append({"adc": adc, "type": "AUTH_REPLY_FAILED", "data": repr(e)})
+        threading.Thread(target=work, daemon=True).start()
 
     def _after_hello(self, adc, msg):
         # The ADC link's reader thread must not wait for an ACK, so resend in a thread.
