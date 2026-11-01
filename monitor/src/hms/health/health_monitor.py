@@ -19,6 +19,39 @@ SELF_CHECK_EVERY = 10.0
 BACKUP_EVERY = 24 * 3600.0
 
 
+# Events of the ADC connection state machine (Deliverable 1, state diagram 1).
+# event_of() turns the heartbeat timing into exactly one event per tick.
+NO_HEARTBEAT_YET = "noHeartbeatYet"   # never heard from, under 3 s since registration
+HEARTBEAT_FRESH = "heartbeatFresh"    # last valid heartbeat under 1.5 s ago
+SILENT_1_5S = "silent1.5s"            # 1.5 s to 3 s since the last valid heartbeat
+SILENT_3S = "silent3s"                # 3 s or more of silence (or never heard from for 3 s)
+
+# The transition table: TRANSITIONS[state][event] -> next state.
+# Every cell is filled; a cell that keeps the state is a decided "ignore", not a gap.
+TRANSITIONS = {
+    "Unknown": {NO_HEARTBEAT_YET: "Unknown", HEARTBEAT_FRESH: "Online",
+                SILENT_1_5S: "Warning", SILENT_3S: "Offline"},
+    "Online":  {NO_HEARTBEAT_YET: "Online", HEARTBEAT_FRESH: "Online",
+                SILENT_1_5S: "Warning", SILENT_3S: "Offline"},
+    "Warning": {NO_HEARTBEAT_YET: "Warning", HEARTBEAT_FRESH: "Online",
+                SILENT_1_5S: "Warning", SILENT_3S: "Offline"},
+    "Offline": {NO_HEARTBEAT_YET: "Offline", HEARTBEAT_FRESH: "Online",
+                SILENT_1_5S: "Offline", SILENT_3S: "Offline"},
+}
+
+
+def event_of(t_hb, t_reg, now):
+    """The function table of SPEC-01: one event for every input case, no overlaps."""
+    if t_hb is None:
+        return NO_HEARTBEAT_YET if now - t_reg < OFFLINE_AFTER else SILENT_3S
+    delta = now - t_hb
+    if delta < WARNING_AFTER:
+        return HEARTBEAT_FRESH
+    if delta < OFFLINE_AFTER:
+        return SILENT_1_5S
+    return SILENT_3S
+
+
 class _Adc:
     def __init__(self, t_reg):
         self.t_reg = t_reg
@@ -41,6 +74,8 @@ class HealthMonitor:
         self._mode = "Normal"
         self._components = {}
         self._failed = set()
+        self._tampered = set()
+        self._checking = threading.Event()
         self._last_check = host.monotonic()
         self._last_backup = host.monotonic()
         # after a restart every known ADC starts as Unknown (SPEC-01, SPEC-11)
@@ -78,31 +113,50 @@ class HealthMonitor:
                     changes.append((adc_id, st.state, new))
                     st.state = new
         for adc_id, old, new in changes:
-            self._log.append({"adc": adc_id, "type": "STATE", "data": "%s -> %s" % (old, new)})
-            if new == "Offline":
-                self._flag(adc_id, "ADC is Offline")
-            for h in list(self._handlers):
-                h(adc_id, old, new)
-        if now - self._last_check >= SELF_CHECK_EVERY:
+            self._enter(adc_id, old, new)
+        if now - self._last_check >= SELF_CHECK_EVERY and not self._checking.is_set():
+            # the self-check runs beside the tick, so checking a long log chain
+            # never delays a connection-state change (SPEC-01: within 0.1 s)
             self._last_check = now
-            self._self_check()
+            self._checking.set()
+            threading.Thread(target=self._run_self_check, daemon=True).start()
         if now - self._last_backup >= BACKUP_EVERY:
             self._last_backup = now
             self._backup()
 
     @staticmethod
     def _compute(st, now):
-        if st.t_hb is None:
-            return "Unknown" if now - st.t_reg < OFFLINE_AFTER else "Offline"
-        delta = now - st.t_hb
-        if delta < WARNING_AFTER:
-            return "Online"
-        return "Warning" if delta < OFFLINE_AFTER else "Offline"
+        """Next state = TRANSITIONS[current state][event]."""
+        return TRANSITIONS[st.state][event_of(st.t_hb, st.t_reg, now)]
+
+    def _enter(self, adc_id, old, new):
+        """Entry actions, in one place for every state: log the change, and on
+        Offline set the maintenance flag (SPEC-04). Then tell the other modules."""
+        self._log.append({"adc": adc_id, "type": "STATE", "data": "%s -> %s" % (old, new)})
+        if new == "Offline":
+            self._flag(adc_id, "ADC is Offline")
+        for h in list(self._handlers):
+            h(adc_id, old, new)
+
+    def _run_self_check(self):
+        try:
+            self._self_check()
+        except Exception as e:              # a failing self-check must be seen, not hidden
+            self._alarms.raise_("SELF_CHECK_FAILED", "critical", "", "self-check crashed: %r" % e)
+        finally:
+            self._checking.clear()
 
     def _self_check(self):
         results = {"gateway": self._gateway.health(), "alarms": self._alarms.health(),
                    "log": self._log.health(), "state": self._state.health()}
-        self._components = results
+        # the hash chain is verified on every self-check, not only at start-up
+        tampered = set(self._log.verify())
+        if tampered - self._tampered:
+            self._alarms.raise_("LOG_TAMPERED", "critical", "",
+                                "log entries changed after they were written: %s"
+                                % sorted(tampered - self._tampered)[:10])
+        self._tampered = tampered
+        self._components = dict(results, **{"log chain": not tampered})
         for name, ok in results.items():
             if not ok and name not in self._failed:
                 self._failed.add(name)

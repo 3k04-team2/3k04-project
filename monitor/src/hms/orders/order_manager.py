@@ -99,6 +99,10 @@ class OrderManager:
                 problem.suggestions = self._suggest(adcId)
                 self._log.append({"adc": adcId, "user": session.user, "type": "ORDER_REFUSED",
                                   "data": "%s x%s: %s" % (med, qty, problem.reason)})
+                if isinstance(problem, AdcFullError):
+                    # a full ADC refuses the order and raises an alarm (FR-OPR-02)
+                    self._alarms.raise_("ADC_FULL", "warning", adcId,
+                                        "ADC %s has no free compartment; order refused" % adcId)
                 raise problem
             self._n += 1
             order = {"id": "ORD-%d" % self._n, "adc": adcId, "doctor": session.user, "medication": med,
