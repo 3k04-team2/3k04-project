@@ -109,6 +109,23 @@ class AccessControl:
             self._log.append({"user": user, "type": "LOGIN", "data": "role " + rec["role"]})
             return session
 
+    def verify(self, user, password, adcId):
+        """Check a login typed at an ADC; returns the role, or None.
+
+        Starts no session and applies no device lockout: the ADC counts its own
+        failures and locks itself out, and an administrator must still be able
+        to log in at a locked-out ADC to reset it.
+        """
+        rec = self._users.get(user) if isinstance(user, str) else None
+        salt = bytes.fromhex(rec["salt"]) if rec else b"\0" * 16
+        good = isinstance(password, str) and hmac.compare_digest(
+            _hash(password, salt).hex(), rec["hash"] if rec else "x")
+        if rec and good:
+            self._log.append({"adc": adcId, "user": user, "type": "ADC_LOGIN", "data": "role " + rec["role"]})
+            return rec["role"]
+        self._log.append({"adc": adcId, "user": str(user), "type": "ADC_LOGIN_FAILED", "data": ""})
+        return None
+
     def logout(self, session):
         with self._lock:
             self._sessions.pop(session.id, None)

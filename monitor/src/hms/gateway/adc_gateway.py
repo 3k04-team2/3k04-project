@@ -12,7 +12,7 @@ from hms.protocol import (Message, ChecksumError, FormatError, UnsupportedRevisi
 from hms.link import NotConnected
 
 TYPES = {"HELLO", "HEARTBEAT", "ORDER_STATUS", "EVENT", "INVENTORY",
-         "ALARM", "ALARM_CLEARED", "LOG_BATCH", "ACK", "NAK"}
+         "ALARM", "ALARM_CLEARED", "LOG_BATCH", "AUTH_REQUEST", "ACK", "NAK"}
 MAX_TEXT = 256
 MAX_QUANTITY = 1000
 MAX_SKEW = 60.0

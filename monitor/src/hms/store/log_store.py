@@ -168,7 +168,9 @@ class LogStore:
         with self._lock:
             bad = []
             prev = self._base()
-            for id_, time, adc, user, type_, blob, h in self._rows(None, "asc"):
+            # the chain follows insertion order; ADC log entries keep their own (older) time
+            rows = self._conn.execute("SELECT id,time,adc,user,type,data,hash FROM log ORDER BY id").fetchall()
+            for id_, time, adc, user, type_, blob, h in rows:
                 try:
                     data = decrypt(self._key, blob).decode("utf-8")
                     ok = entry_hash(prev, time, adc, user, type_, data) == h
