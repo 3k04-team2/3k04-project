@@ -20,6 +20,7 @@ import json
 import os
 import sqlite3
 import threading
+import time as _time
 
 from hms.host import DiskError, FileMissing
 
@@ -79,6 +80,9 @@ class LogStore:
         self._lock = threading.RLock()
         self._dirty = False
         self.damaged = False
+        # decrypted text kept in memory by entry id, so a search over 100,000 entries
+        # stays under 1 s (NFR-PER-03); entries stay encrypted on disk
+        self._plain = {}
         self._open_database()
 
     # ---- storage ------------------------------------------------------
@@ -90,6 +94,7 @@ class LogStore:
         return conn
 
     def _open_database(self):
+        self._plain = {}
         self._conn = self._new_db()
         if self._host.exists(self._path):
             try:
@@ -125,9 +130,11 @@ class LogStore:
             row = self._conn.execute("SELECT hash FROM log ORDER BY id DESC LIMIT 1").fetchone()
             prev = row[0] if row else self._base()
             h = entry_hash(prev, time, adc, user, type_, data)
+            blob = encrypt(self._key, data.encode("utf-8"))
             cur = self._conn.execute(
                 "INSERT INTO log(time, adc, user, type, data, hash) VALUES (?,?,?,?,?,?)",
-                (time, adc, user, type_, encrypt(self._key, data.encode("utf-8")), h))
+                (time, adc, user, type_, blob, h))
+            self._plain[cur.lastrowid] = (blob, data)
             self._conn.commit()
             self._persist()
             return cur.lastrowid
@@ -155,13 +162,25 @@ class LogStore:
         with self._lock:
             out = []
             for id_, time, adc, user, type_, blob, h in self._rows(flt, sort):
-                try:
-                    data = decrypt(self._key, blob).decode("utf-8")
-                except ValueError:
+                data = self._text(id_, blob)
+                if data is None:
                     data = "<cannot be decrypted>"
                 out.append({"id": id_, "time": time, "adc": adc, "user": user,
                             "type": type_, "data": data, "hash": h})
             return out
+
+    def _text(self, id_, blob):
+        """Decrypted text of an entry, or None if it cannot be decrypted. Cached by id;
+        a changed blob is decrypted again, so tampering is still seen."""
+        hit = self._plain.get(id_)
+        if hit is not None and hit[0] == blob:
+            return hit[1]
+        try:
+            data = decrypt(self._key, blob).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
+        self._plain[id_] = (blob, data)
+        return data
 
     def verify(self):
         """Ids of entries whose hash does not match their content."""
@@ -169,11 +188,8 @@ class LogStore:
             bad = []
             prev = self._base()
             for id_, time, adc, user, type_, blob, h in self._rows(None, "asc"):
-                try:
-                    data = decrypt(self._key, blob).decode("utf-8")
-                    ok = entry_hash(prev, time, adc, user, type_, data) == h
-                except ValueError:
-                    ok = False
+                data = self._text(id_, blob)
+                ok = data is not None and entry_hash(prev, time, adc, user, type_, data) == h
                 if not ok:
                     bad.append(id_)
                 prev = h
@@ -193,6 +209,38 @@ class LogStore:
             self._host.write_file(path, buf.getvalue().encode("utf-8"))
             self.append({"user": user, "type": "EXPORT", "data": "%d entries to %s" % (len(rows), path)})
             return path
+
+    def report(self, flt=None, user="system"):
+        """FR-OPR-12: collate the matching entries into a human-readable report, save it
+        as a text file and return (path, text). Exception: NoMatches."""
+        with self._lock:
+            rows = self.query(flt)
+            if not rows:
+                raise NoMatches("no entries match")
+            by_type, by_adc, alarms = {}, {}, {}
+            for r in rows:
+                by_type[r["type"]] = by_type.get(r["type"], 0) + 1
+                if r["adc"]:
+                    by_adc[r["adc"]] = by_adc.get(r["adc"], 0) + 1
+                if r["type"] == "ALARM":
+                    kind = r["data"].split(":")[0]
+                    alarms[kind] = alarms.get(kind, 0) + 1
+            fmt = lambda t: _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(t))
+            lines = ["Hospital Monitoring System log report",
+                     "Made %s by %s" % (fmt(self._host.now()), user),
+                     "Filter: %s" % (", ".join("%s = %s" % kv for kv in sorted((flt or {}).items())) or "none"),
+                     "Entries: %d, from %s to %s" % (len(rows), fmt(rows[0]["time"]), fmt(rows[-1]["time"])),
+                     "", "Entries by type:"]
+            lines += ["  %-20s %d" % kv for kv in sorted(by_type.items(), key=lambda kv: -kv[1])]
+            lines += ["", "Entries by ADC:"]
+            lines += ["  %-20s %d" % kv for kv in sorted(by_adc.items())] or ["  none"]
+            lines += ["", "Alarms by severity and type:"]
+            lines += ["  %-40s %d" % kv for kv in sorted(alarms.items(), key=lambda kv: -kv[1])] or ["  none"]
+            text = "\n".join(lines) + "\n"
+            path = os.path.join(self._dir, "exports", "log-report-%d.txt" % int(self._host.now()))
+            self._host.write_file(path, text.encode("utf-8"))
+            self.append({"user": user, "type": "REPORT", "data": "%d entries to %s" % (len(rows), path)})
+            return path, text
 
     def delete(self, before):
         with self._lock:

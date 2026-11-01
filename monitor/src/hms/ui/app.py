@@ -132,6 +132,11 @@ class WebApp:
             self._need(s, "view_logs")
             flt = {k: q[k] for k in ("adc", "user", "type") if q.get(k)}
             return {"file": self.log.exportCsv(flt, s.user)}
+        if path == "/api/report":
+            self._need(s, "view_logs")
+            flt = {k: q[k] for k in ("adc", "user", "type") if q.get(k)}
+            file, text = self.log.report(flt, s.user)
+            return {"file": file, "text": text}
         if path == "/api/roles":
             return {"users": self.access.users(s),
                     "roles": ["Doctor", "Nurse", "Pharmacist", "Technician", "Administrator", "IT"]}

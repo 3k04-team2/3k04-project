@@ -86,8 +86,9 @@
       <h2>Log</h2>
       <p><label>ADC <input id="l-adc" size="8"></label> <label>User <input id="l-user" size="8"></label>
          <label>Type <input id="l-type" size="12"></label>
-         <button id="l-go">Show</button> <button id="l-export">Export CSV</button></p>
+         <button id="l-go">Show</button> <button id="l-export">Export CSV</button> <button id="l-report">Report</button></p>
       <p id="l-msg"></p>
+      <pre id="l-report-text" class="hidden"></pre>
       <table><thead><tr><th>Id</th><th>Time</th><th>ADC</th><th>User</th><th>Type</th><th>Data</th><th>Chain</th></tr></thead>
       <tbody id="logs"></tbody></table>
     </section>
@@ -216,6 +217,10 @@ async function loadLogs() { try { const j = await api("/api/logs", filt()); cons
   } catch (e) { $("l-msg").innerHTML = `<span class="error">${esc(e.message)}</span>`; } }
 $("l-go").onclick = loadLogs;
 $("l-export").onclick = async () => { try { const j = await api("/api/export", filt()); $("l-msg").innerHTML = `<span class="ok">Exported to ${esc(j.file)}</span>`; loadLogs(); }
+  catch (e) { $("l-msg").innerHTML = `<span class="error">${esc(e.message)}</span>`; } };
+$("l-report").onclick = async () => { try { const j = await api("/api/report", filt());
+  $("l-msg").innerHTML = `<span class="ok">Report saved to ${esc(j.file)}</span>`;
+  $("l-report-text").textContent = j.text; $("l-report-text").classList.remove("hidden"); }
   catch (e) { $("l-msg").innerHTML = `<span class="error">${esc(e.message)}</span>`; } };
 async function loadRoles() { try { const j = await api("/api/roles");
   $("users").innerHTML = Object.entries(j.users).map(([u, r]) => `<tr><td>${esc(u)}</td><td><select data-u="${esc(u)}">${j.roles.map(x => `<option ${x === r ? "selected" : ""}>${x}</option>`).join("")}</select></td>

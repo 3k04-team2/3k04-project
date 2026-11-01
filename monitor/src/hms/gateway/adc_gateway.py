@@ -167,9 +167,14 @@ class AdcGateway:
             return
         try:
             self._check_bounds(None, msg.body)
+            skew = abs(msg.time - self._host.now())
+            if skew > MAX_SKEW:
+                raise BoundsError("timestamp %.0f s away from HMS time" % skew)
         except BoundsError as e:
             self._reject(conn, msg.adc, msg.seq, str(e))
             return
+        # HELLO is the one message whose sequence number is not compared with the
+        # last one: it starts a new session, so the ADC's numbering starts again.
         with self._lock:
             st = self._adcs.get(msg.adc)
             if st is None:
