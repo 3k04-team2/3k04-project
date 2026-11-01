@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hospital Monitoring System</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #111; }
+  header { background: #1f3a5f; color: #fff; padding: 10px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  nav button { margin-right: 6px; padding: 6px 12px; }
+  nav button.on { background: #1f3a5f; color: #fff; }
+  section { background: #fff; border: 1px solid #c9d1d9; border-radius: 6px; padding: 12px; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border: 1px solid #c9d1d9; padding: 5px 8px; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #333; }
+  .Online, .Normal, .Acknowledged, .Fulfilled, .Placed { background: #c8e6c9; }
+  .Warning, .Maintenance, .Pending, .Stocked, .warning { background: #fff3b0; }
+  .Offline, .Fault, .Active, .critical, .Failed { background: #ffb3b3; }
+  .Unknown, .Cancelled, .Cleared { background: #ddd; }
+  .stale { color: #8a4b00; font-style: italic; }
+  .error { color: #a30000; font-weight: bold; }
+  .ok { color: #1b5e20; font-weight: bold; }
+  .hidden { display: none; }
+  input, select { padding: 4px; }
+  .confirm { border: 2px solid #1f3a5f; padding: 8px; margin-top: 8px; background: #eef4ff; }
+  .bar { height: 10px; background: #ddd; width: 100px; display: inline-block; vertical-align: middle; }
+  .bar i { display: block; height: 10px; background: #1f3a5f; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hospital Monitoring System</h1>
+  <span id="who"></span>
+  <span id="mode"></span>
+  <span id="tone"></span>
+  <button id="logout" class="hidden">Log out</button>
+</header>
+<main>
+  <section id="login">
+    <h2>Log in</h2>
+    <p><label>User <input id="u" autocomplete="username"></label>
+       <label>Password <input id="p" type="password" autocomplete="current-password"></label>
+       <button id="go">Log in</button></p>
+    <p id="loginmsg" class="error"></p>
+  </section>
+
+  <div id="app" class="hidden">
+    <nav id="tabs"></nav>
+    <p id="msg"></p>
+
+    <section id="t-status">
+      <h2>System status</h2>
+      <p id="components"></p>
+      <table><thead><tr><th>ADC</th><th>State</th><th>Maintenance</th><th>Versions</th><th>Compartments used</th><th>Last inventory</th></tr></thead>
+      <tbody id="adcs"></tbody></table>
+      <h3>Notifications</h3><ul id="notices"></ul>
+    </section>
+
+    <section id="t-orders" class="hidden">
+      <h2>Orders and inventory</h2>
+      <form id="orderform">
+        <label>ADC <select id="o-adc"></select></label>
+        <label>Medication <select id="o-med"></select></label>
+        <label>Quantity <input id="o-qty" type="number" min="1" max="1000" value="1" style="width:70px"></label>
+        <button type="submit">Review order</button>
+      </form>
+      <div id="confirm" class="confirm hidden">
+        <p id="confirmtext"></p>
+        <button id="confirmyes">Confirm and send</button> <button id="confirmno">Cancel</button>
+      </div>
+      <h3>Orders</h3>
+      <table><thead><tr><th>Order</th><th>ADC</th><th>Compartment</th><th>Medication</th><th>Quantity</th><th>Doctor</th><th>Status</th><th></th></tr></thead>
+      <tbody id="orders"></tbody></table>
+    </section>
+
+    <section id="t-alarms" class="hidden">
+      <h2>Alarms</h2>
+      <table><thead><tr><th>Alarm</th><th>ADC</th><th>Severity</th><th>Status</th><th>Details</th><th>Time</th><th></th></tr></thead>
+      <tbody id="alarms"></tbody></table>
+    </section>
+
+    <section id="t-logs" class="hidden">
+      <h2>Log</h2>
+      <p><label>ADC <input id="l-adc" size="8"></label> <label>User <input id="l-user" size="8"></label>
+         <label>Type <input id="l-type" size="12"></label>
+         <button id="l-go">Show</button> <button id="l-export">Export CSV</button></p>
+      <p id="l-msg"></p>
+      <table><thead><tr><th>Id</th><th>Time</th><th>ADC</th><th>User</th><th>Type</th><th>Data</th><th>Chain</th></tr></thead>
+      <tbody id="logs"></tbody></table>
+    </section>
+
+    <section id="t-roles" class="hidden">
+      <h2>Roles</h2>
+      <table><thead><tr><th>User</th><th>Role</th><th></th></tr></thead><tbody id="users"></tbody></table>
+      <p id="r-msg"></p>
+    </section>
+
+    <section id="t-sim" class="hidden">
+      <h2>Demo controls (simulated host)</h2>
+      <p>The demo clock moves with real time. These buttons skip ahead or break the speaker and the disk.</p>
+      <button data-adv="1">+1 s</button> <button data-adv="5">+5 s</button> <button data-adv="30">+30 s</button>
+      <label><input type="checkbox" id="s-spk"> speaker broken</label>
+      <label><input type="checkbox" id="s-disk"> disk full</label>
+    </section>
+  </div>
+</main>
+<script>
+let token = null, S = null, tab = "status", pending = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tag = t => `<span class="tag ${esc(t)}">${esc(String(t).toUpperCase())}</span>`;
+const when = t => t ? new Date(t * 1000).toLocaleTimeString() : "none";
+
+async function api(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"},
+                               body: JSON.stringify(Object.assign({token}, body || {}))});
+  const j = await r.json();
+  if (r.status === 401 && token) { token = null; show(false); $("loginmsg").textContent = j.error; }
+  if (!r.ok) { const e = new Error(j.error || r.statusText); e.data = j; throw e; }
+  return j;
+}
+function say(text, ok) { $("msg").innerHTML = `<span class="${ok ? "ok" : "error"}">${esc(text)}</span>`; }
+async function act(fn, done) { try { await fn(); if (done) say(done, true); refresh(); } catch (e) {
+  say(e.message + (e.data && e.data.suggestions && e.data.suggestions.length ? " Try ADC: " + e.data.suggestions.join(", ") : ""), false); } }
+
+function show(inApp) {
+  $("login").classList.toggle("hidden", inApp); $("app").classList.toggle("hidden", !inApp);
+  $("logout").classList.toggle("hidden", !inApp);
+  if (!inApp) { $("who").textContent = ""; $("mode").innerHTML = ""; $("tone").textContent = ""; }
+}
+$("go").onclick = async () => {
+  try { const j = await api("/api/login", {user: $("u").value, password: $("p").value});
+        token = j.token; $("p").value = ""; $("loginmsg").textContent = ""; show(true); refresh();
+  } catch (e) { $("loginmsg").textContent = e.message; } };
+$("p").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+$("logout").onclick = async () => { try { await api("/api/logout"); } catch (e) {} token = null; show(false); };
+
+function tabs() {
+  const all = [["status", "Status"], ["orders", "Orders"], ["alarms", "Alarms"]];
+  if (S.perms.includes("view_logs")) all.push(["logs", "Log"]);
+  if (S.perms.includes("manage_roles")) all.push(["roles", "Roles"]);
+  if (S.sim) all.push(["sim", "Demo controls"]);
+  $("tabs").innerHTML = all.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? "on" : ""}">${n}</button>`).join("");
+  document.querySelectorAll("section[id^=t-]").forEach(s => s.classList.toggle("hidden", s.id !== "t-" + tab));
+}
+$("tabs").onclick = e => { const k = e.target.dataset.tab; if (k) { tab = k; tabs(); if (k === "logs") loadLogs(); if (k === "roles") loadRoles(); } };
+
+async function refresh() {
+  if (!token) return;
+  try { S = await (await fetch("/api/state", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({token})})).json(); }
+  catch (e) { return; }
+  if (S.error) { token = null; show(false); $("loginmsg").textContent = S.error; return; }
+  $("who").textContent = S.user + " (" + S.role + ")";
+  $("mode").innerHTML = "Mode: " + tag(S.mode);
+  $("tone").innerHTML = S.tone ? '<span class="tag critical">ALARM TONE ON</span>' : "";
+  tabs(); render();
+}
+
+function render() {
+  $("components").innerHTML = "Self-check: " + (Object.keys(S.components).length ?
+    Object.entries(S.components).map(([k, v]) => `${esc(k)} ${v ? '<span class="ok">ok</span>' : '<span class="error">FAILED</span>'}`).join(", ") : "not run yet");
+  $("adcs").innerHTML = S.adcs.map(a => `<tr><td>${esc(a.id)}</td>
+    <td>${tag(a.state)} ${a.stale ? '<span class="stale">(stale data)</span>' : ""}</td>
+    <td>${a.maintenance ? tag("Warning") + " needs maintenance " + (S.perms.includes("clear_maintenance") ? `<button data-clear="${esc(a.id)}">Clear flag</button>` : "") : "none"}</td>
+    <td>protocol ${esc(a.versions.protocol)}, software ${esc(a.versions.software)}, firmware ${esc(a.versions.firmware)}</td>
+    <td>${a.capacity - a.free} of ${a.capacity} <span class="bar"><i style="width:${Math.round(a.occupancy * 100)}%"></i></span> ${Math.round(a.occupancy * 100)}%</td>
+    <td class="${a.stale ? "stale" : ""}">${when(a.updated)}</td></tr>`).join("") || '<tr><td colspan="6">No ADC has connected yet.</td></tr>';
+  $("notices").innerHTML = S.notices.map(n => `<li>${when(n.time)}: ${esc(n.text)}</li>`).join("") || "<li>none</li>";
+
+  const cur = Array.from($("o-adc").options).map(o => o.value).join();
+  const ids = S.adcs.map(a => a.id);
+  if (cur !== ids.join()) $("o-adc").innerHTML = ids.map(i => `<option>${esc(i)}</option>`).join("");
+  if ($("o-med").options.length !== Object.keys(S.formulary).length)
+    $("o-med").innerHTML = Object.entries(S.formulary).map(([m, mx]) => `<option value="${esc(m)}">${esc(m)} (max ${mx})</option>`).join("");
+
+  $("orders").innerHTML = S.orders.map(o => `<tr><td>${esc(o.id)}</td><td>${esc(o.adc)}</td><td>${o.compartment}</td>
+    <td>${esc(o.medication)}</td><td>${o.quantity}</td><td>${esc(o.doctor)}</td><td>${tag(o.status)}</td>
+    <td>${["Pending", "Placed"].includes(o.status) && S.perms.includes("submit_order") ? `<button data-cancel="${esc(o.id)}">Cancel order</button>` : ""}
+        ${["Placed", "Stocked"].includes(o.status) && S.perms.includes("mark_fulfilled") ? `<button data-fulfil="${esc(o.id)}">Mark fulfilled</button>` : ""}</td></tr>`).join("")
+    || '<tr><td colspan="8">No orders.</td></tr>';
+  $("orderform").classList.toggle("hidden", !S.perms.includes("submit_order"));
+
+  $("alarms").innerHTML = S.alarms.map(a => `<tr><td>${esc(a.type)}</td><td>${esc(a.adc)}</td><td>${tag(a.severity)}</td><td>${tag(a.status)}</td>
+    <td>${esc(a.text)}</td><td>${when(a.time)}</td>
+    <td>${a.status === "Active" && S.perms.includes("ack_alarm") ? `<button data-ack="${esc(a.id)}">Acknowledge</button>` : esc(a.by)}</td></tr>`).join("")
+    || '<tr><td colspan="7">No alarms.</td></tr>';
+  if (S.sim) { $("s-spk").checked = S.sim.speaker_broken; $("s-disk").checked = S.sim.disk_full; }
+}
+
+document.body.addEventListener("click", e => {
+  const d = e.target.dataset;
+  if (d.clear) act(() => api("/api/clear_maintenance", {adc: d.clear}), "Maintenance flag cleared");
+  if (d.cancel) act(() => api("/api/cancel", {order: d.cancel}), "Order cancelled");
+  if (d.fulfil) act(() => api("/api/fulfil", {order: d.fulfil}), "Order marked fulfilled");
+  if (d.ack) act(() => api("/api/ack", {alarm: d.ack}), "Alarm acknowledged");
+  if (d.adv) act(() => api("/api/sim", {advance: d.adv}));
+});
+$("orderform").onsubmit = e => { e.preventDefault();
+  pending = {adc: $("o-adc").value, medication: $("o-med").value, quantity: parseInt($("o-qty").value, 10)};
+  $("confirmtext").textContent = `Send ${pending.quantity} x ${pending.medication} to ADC ${pending.adc}?`;
+  $("confirm").classList.remove("hidden"); };
+$("confirmno").onclick = () => { pending = null; $("confirm").classList.add("hidden"); };
+$("confirmyes").onclick = () => { const p = pending; pending = null; $("confirm").classList.add("hidden");
+  act(() => api("/api/order", Object.assign({confirmed: true}, p)), "Order placed"); };
+$("s-spk").onchange = e => act(() => api("/api/sim", {speaker_broken: e.target.checked}));
+$("s-disk").onchange = e => act(() => api("/api/sim", {disk_full: e.target.checked}));
+
+function filt() { return {adc: $("l-adc").value, user: $("l-user").value, type: $("l-type").value}; }
+async function loadLogs() { try { const j = await api("/api/logs", filt()); const bad = new Set(j.tampered);
+  $("l-msg").innerHTML = bad.size ? '<span class="error">TAMPERED entries: ' + [...bad].join(", ") + "</span>" : '<span class="ok">Hash chain verified: no tampered entries</span>';
+  $("logs").innerHTML = j.entries.map(r => `<tr><td>${r.id}</td><td>${new Date(r.time * 1000).toLocaleString()}</td><td>${esc(r.adc)}</td><td>${esc(r.user)}</td>
+    <td>${esc(r.type)}</td><td>${esc(r.data)}</td><td>${bad.has(r.id) ? '<span class="error">TAMPERED</span>' : "ok"}</td></tr>`).join("");
+  } catch (e) { $("l-msg").innerHTML = `<span class="error">${esc(e.message)}</span>`; } }
+$("l-go").onclick = loadLogs;
+$("l-export").onclick = async () => { try { const j = await api("/api/export", filt()); $("l-msg").innerHTML = `<span class="ok">Exported to ${esc(j.file)}</span>`; loadLogs(); }
+  catch (e) { $("l-msg").innerHTML = `<span class="error">${esc(e.message)}</span>`; } };
+async function loadRoles() { try { const j = await api("/api/roles");
+  $("users").innerHTML = Object.entries(j.users).map(([u, r]) => `<tr><td>${esc(u)}</td><td><select data-u="${esc(u)}">${j.roles.map(x => `<option ${x === r ? "selected" : ""}>${x}</option>`).join("")}</select></td>
+    <td><button data-setrole="${esc(u)}">Save and send to ADCs</button></td></tr>`).join(""); } catch (e) { $("r-msg").textContent = e.message; } }
+$("users").onclick = async e => { const u = e.target.dataset.setrole; if (!u) return;
+  const role = document.querySelector(`select[data-u="${u}"]`).value;
+  try { const j = await api("/api/set_role", {user: u, role}); $("r-msg").innerHTML = '<span class="ok">Saved. ADC sync: ' +
+    (Object.entries(j.sync).map(([a, s]) => esc(a) + " " + esc(s)).join(", ") || "no ADCs registered") + "</span>"; }
+  catch (err) { $("r-msg").innerHTML = `<span class="error">${esc(err.message)}</span>`; } };
+
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
