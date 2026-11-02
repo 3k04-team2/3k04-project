@@ -8,7 +8,7 @@ it arrives) and NFR-SEC-05 (a password check answered within 500 ms).
 
 Every message to the HMS except HEARTBEAT and AUTH_REQUEST is kept until the
 HMS acknowledges it. While the link is down, messages wait in an outbox kept in
-non-volatile storage, and syncQueue sends them after the next HELLO. Each
+memory, and syncQueue sends them after the next HELLO. Each
 message carries its original time in body["at"]; the frame gets a fresh
 timestamp when it is actually sent, because the HMS refuses frames more than
 60 s off its clock.
@@ -43,11 +43,11 @@ FIRMWARE = "sim-hw-1.0"
 
 
 class HmsComm:
-    def __init__(self, adc_id, host, port, capacity, nvram, clock=time.time, log=None):
+    def __init__(self, adc_id, host, port, capacity, memory, clock=time.time, log=None):
         self._id = adc_id
         self._host, self._port = host, port
         self._capacity = capacity
-        self._nvram = nvram
+        self._memory = memory
         self._clock = clock
         self._say = log or (lambda text: print("[%s] %s" % (adc_id, text), flush=True))
         self._codec = MessageCodec()
@@ -55,7 +55,7 @@ class HmsComm:
         self._sock = None
         self._seq = 0
         self._offset = 0.0              # HMS clock minus ours
-        self._outbox = list(nvram.read("outbox", []))
+        self._outbox = list(memory.read("outbox", []))
         self._unacked = {}
         self._auth_waits = {}
         self._auth_n = 0
@@ -203,7 +203,7 @@ class HmsComm:
 
     def _save(self):
         pending = [self._unacked[k] for k in sorted(self._unacked)] + self._outbox
-        self._nvram.write("outbox", pending)
+        self._memory.write("outbox", pending)
 
     # ---- receiving ----------------------------------------------------------------------
     def _read(self, s):

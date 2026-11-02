@@ -11,7 +11,7 @@ This is the Deliverable 2 design implemented: the 4-variable model, the REQ tabl
 3. Open the cabinet panel at http://127.0.0.1:8090 and the HMS at http://127.0.0.1:8080
 
 Options: `--id` (default ADC-1), `--hms-host`, `--port` (HMS cabinet port, default 9000), `--capacity` (default 16),
-`--ui-port` (default 8090), `--data` (non-volatile data, default `adc/src/data/<id>`), `--lan`.
+`--ui-port` (default 8090), `--data` (folder for the cabinet's memory, default `adc/src/data/<id>`), `--lan`.
 
 The panel stands in for the physical cabinet. It has the screen, the keypad and badge login, the barcode scan, and the compartment sensor.
 It also lets you open and close the door, trigger the tamper switch, cut the mains power and unplug the network.
@@ -34,7 +34,7 @@ A typical run:
 | 1.1.3 Display | `hardware/display.py` | `Display` | the screen; all wording is in `MESSAGES` |
 | 1.1.4 Door | `hardware/door.py` | `Door` | latch, door and tamper sensors; reports `forced` when opened while latched |
 | 1.1.5 Timer | `hardware/timer.py` | `Timer`, `SimulatedTimer` | the clock |
-| 1.1 (added) non-volatile storage | `hardware/nvram.py` | `Nvram` | data that survives a power cut |
+| 1.1 (added) Memory | `hardware/memory.py` | `Memory` | data that survives a power cut |
 | 1.2.1 Authentication & Access Control | `software/auth.py` | `AuthManager` | HMS login check, failed-attempt count, lockout, session, service roles |
 | 1.2.2 Inventory Manager | `software/inventory.py` | `InventoryManager` | compartments, deposit checks, quantity confirmation, inventory and capacity reports |
 | 1.2.3 Event Logger | `software/event_logger.py` | `EventLogger` | the local log and `LOG_BATCH` uploads |
@@ -63,7 +63,7 @@ The older command-line cabinet simulator that the monitor tests use is in `monit
 | FR-HMS-02, NFR-HMS-01 | Comm, Inventory | `HmsComm` (`ORDER_LIST` + ACK), `InventoryManager.reconcile` |
 | FR-HMS-03 | Comm, Dispensing | `ORDER_STATUS` (Stocked / Fulfilled) from `DispensingManager` through `HmsComm` |
 | FR-HMS-04 | Comm, Inventory | `InventoryManager._report` (`EVENT`, `INVENTORY` with `capacity_warning`) |
-| FR-HMS-06 | Inventory | `InventoryManager` saved to `Nvram` |
+| FR-HMS-06 | Inventory | `InventoryManager` saved to `Memory` |
 | FR-HMS-07 | Comm | `HmsComm._beat` (every 0.5 s) |
 
 ## Design decisions made while coding

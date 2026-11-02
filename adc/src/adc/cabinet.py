@@ -1,6 +1,6 @@
 """1 ADC Entire System: builds every module and connects them.
 
-The door (the physical enclosure) and the non-volatile storage outlive a power
+The door (the physical enclosure) and the memory outlive a power
 cut; everything else is rebuilt from storage when the power comes back
 (NAT-05, FR-HMS-06).
 """
@@ -8,7 +8,7 @@ cut; everything else is rebuilt from storage when the power comes back
 import threading
 
 from adc.behaviour import AlarmPolicy, DispensingManager, StateMachine, state_machine as sm
-from adc.hardware import AlarmHardware, Display, Door, Keyboard, Nvram, Timer
+from adc.hardware import AlarmHardware, Display, Door, Keyboard, Memory, Timer
 from adc.software import AuthManager, EventLogger, HmsComm, InventoryManager
 
 TICK = 0.05     # the 500 ms alarm deadline (NFR-SEC-04) is met with a 50 ms tick
@@ -20,9 +20,9 @@ class Cabinet:
         self.id = adc_id
         self.capacity = capacity
         self.door = Door()
-        self.nvram = Nvram(data_dir)
+        self.memory = Memory(data_dir)
         self.timer = timer or Timer()
-        self._comm_factory = comm_factory or (lambda nvram: HmsComm(adc_id, hms_host, hms_port, capacity, nvram))
+        self._comm_factory = comm_factory or (lambda memory: HmsComm(adc_id, hms_host, hms_port, capacity, memory))
         self.powered = False
         self._network = True
         self._stop = None
@@ -39,10 +39,10 @@ class Cabinet:
             self.keyboard = Keyboard()
             self.display = Display(self.timer)
             # 1.2 software hiding (uses hardware only)
-            self.comm = self._comm_factory(self.nvram)
-            self.logger = EventLogger(self.nvram, self.timer, self.comm)
-            self.inventory = InventoryManager(self.id, self.nvram, self.capacity, self.comm)
-            self.auth = AuthManager(self.comm, self.timer, self.nvram, self.logger)
+            self.comm = self._comm_factory(self.memory)
+            self.logger = EventLogger(self.memory, self.timer, self.comm)
+            self.inventory = InventoryManager(self.id, self.memory, self.capacity, self.comm)
+            self.auth = AuthManager(self.comm, self.timer, self.memory, self.logger)
             # 1.3 behaviour (uses software and hardware)
             self.alarms = AlarmPolicy(self.alarm_hw, self.timer, self.logger, self.comm, self.door)
             self.machine = StateMachine(self.timer, self.door, self.auth, self.alarms, self.display, self.logger)

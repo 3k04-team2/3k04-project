@@ -9,7 +9,9 @@
   header h1 { font-size: 18px; margin: 0; flex: 1; }
   .pill { padding: 3px 10px; border-radius: 12px; background: #457b9d; font-size: 13px; }
   .pill.bad { background: #c1121f; } .pill.ok { background: #2a9d8f; } .pill.warn { background: #e9c46a; color: #1d2733; }
-  main { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px; }
+  main { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.1fr);
+         gap: 14px; padding: 14px; align-items: start; }
+  @media (max-width: 1300px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
   @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
   section { background: #fff; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px #0002; }
   h2 { font-size: 15px; margin: 0 0 8px; color: #1d3557; }
@@ -30,8 +32,7 @@
   .buzzer { width: 18px; height: 18px; border-radius: 50%; display: inline-block; background: #bbb; vertical-align: middle; }
   .buzzer.on { background: #c1121f; animation: blink .4s infinite alternate; }
   @keyframes blink { from { opacity: 1; } to { opacity: .2; } }
-  .small { font-size: 12px; color: #555; }
-</style>
+  .small { font-size: 12px; color: #555; }</style>
 </head>
 <body>
 <header>
@@ -72,9 +73,21 @@
     <button class="green" onclick="input('confirm_quantity', {matches: true})">Yes</button>
     <button class="red" onclick="input('confirm_quantity', {matches: false})">No</button>
 
-    <h3>Compartment</h3>
-    <button class="green" onclick="input('compartment_done')">Medication taken out / placed in</button>
+    <h3>Keypad</h3>
     <button class="grey" onclick="input('cancel')">Cancel</button>
+  </section>
+
+  <section>
+    <h2>Physical world (normal use)</h2>
+    <h3>Door</h3>
+    <button onclick="post('/api/door', {open: true})">Open door</button>
+    <button onclick="post('/api/door', {open: false})">Close door</button>
+
+    <h3>Compartment sensor</h3>
+    <button class="green" onclick="input('compartment_done')">Medication taken out / placed in</button>
+
+    <h3>Status</h3>
+    <table id="status"></table>
   </section>
 
   <section>
@@ -86,20 +99,16 @@
     <button class="grey" onclick="service('maintenance', {enable: true})">Maintenance on</button>
     <button class="grey" onclick="service('maintenance', {enable: false})">Maintenance off</button>
 
-    <h3>Physical world (simulation)</h3>
-    <button onclick="post('/api/door', {open: true})">Open door</button>
-    <button onclick="post('/api/door', {open: false})">Close door</button>
+    <h3>Active alarms</h3>
+    <table id="alarms"></table>
+
+    <h3>Off-normal events (simulation)</h3>
     <button class="red" onclick="post('/api/tamper', {on: true})">Tamper / damage</button>
     <button class="grey" onclick="post('/api/tamper', {on: false})">Repair tamper</button><br>
     <button class="red" onclick="post('/api/power', {on: false})">Cut power</button>
-    <button class="green" onclick="post('/api/power', {on: true})">Restore power</button>
+    <button class="green" onclick="post('/api/power', {on: true})">Restore power</button><br>
     <button class="grey" onclick="post('/api/network', {up: false})">Unplug network</button>
     <button class="grey" onclick="post('/api/network', {up: true})">Plug network</button>
-
-    <h3>Status</h3>
-    <table id="status"></table>
-    <h3>Active alarms</h3>
-    <table id="alarms"></table>
   </section>
 
   <section>
@@ -172,8 +181,8 @@ function render(s) {
   rows("alarms", ["Reason", "Since", "Seconds"], s.alarm.active.map(a => [a.text, t(a.time), a.elapsed.toFixed(0)]));
   $("occupancy").textContent = s.inventory.occupied + " of " + s.inventory.capacity + " compartments used (" +
     Math.round(s.inventory.level * 100) + "%)" + (s.inventory.level >= 0.95 ? " - 95% capacity warning sent to HMS" : "");
-  rows("stocked", ["Comp.", "Order", "Medication", "Qty"], s.inventory.stocked.map(o => [o.compartment, o.order, o.medication, o.quantity]));
-  rows("pending", ["Order", "Medication", "Qty", "Comp."], s.inventory.pending.map(o => [o.order, o.medication, o.quantity, o.compartment]));
+  rows("stocked", ["Compartment", "Order", "Medication", "Qty"], s.inventory.stocked.map(o => [o.compartment, o.order, o.medication, o.quantity]));
+  rows("pending", ["Order", "Medication", "Qty", "Compartment"], s.inventory.pending.map(o => [o.order, o.medication, o.quantity, o.compartment]));
   rows("events", ["Time", "Event", "User", "Details"], s.events.map(e => [t(e.time), e.type, e.user,
     Object.entries(e.details || {}).map(([k, x]) => k + ": " + (typeof x === "object" ? JSON.stringify(x) : x)).join(", ")]));
 }
