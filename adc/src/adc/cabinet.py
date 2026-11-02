@@ -34,18 +34,21 @@ class Cabinet:
         with self._lock:
             if self.powered:
                 return
+            # 1.1 hardware hiding
             self.alarm_hw = AlarmHardware()
             self.keyboard = Keyboard()
             self.display = Display(self.timer)
-            self.logger = EventLogger(self.nvram, self.timer)
+            # 1.2 software hiding (uses hardware only)
             self.comm = self._comm_factory(self.nvram)
-            self.inventory = InventoryManager(self.nvram, self.capacity)
+            self.logger = EventLogger(self.nvram, self.timer, self.comm)
+            self.inventory = InventoryManager(self.id, self.nvram, self.capacity, self.comm)
             self.auth = AuthManager(self.comm, self.timer, self.nvram, self.logger)
-            self.alarms = AlarmPolicy(self.alarm_hw, self.timer, self.logger, self.comm)
-            self.machine = StateMachine(sm.LOCKED_OUT if self.auth.isLockedOut() else sm.IDLE)
-            self.dispensing = DispensingManager(self.id, self.timer, self.display, self.door, self.keyboard,
-                                                self.alarm_hw, self.alarms, self.machine, self.auth,
-                                                self.inventory, self.logger, self.comm)
+            # 1.3 behaviour (uses software and hardware)
+            self.alarms = AlarmPolicy(self.alarm_hw, self.timer, self.logger, self.comm, self.door)
+            self.machine = StateMachine(self.timer, self.door, self.auth, self.alarms, self.display, self.logger)
+            self.dispensing = DispensingManager(self.id, self.display, self.door, self.keyboard, self.alarm_hw,
+                                                self.alarms, self.machine, self.auth, self.inventory,
+                                                self.logger, self.comm)
             self.logger.logEvent("POWER_ON", details={"state": self.machine.getState(),
                                                       "stocked": self.inventory.occupancy()})
             self.powered = True

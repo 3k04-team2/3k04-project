@@ -2,8 +2,9 @@
 
 Secret: the network transport (TCP, one frame per line), the message format
 (the HMS codec: JSON with CRC-32), sequence numbers, acknowledgements and the
-offline queue. Implements FR-HMS-02, FR-HMS-07 (heartbeat every 0.5 s) and
-NFR-HMS-01 (an ORDER_LIST is stored and acknowledged as soon as it arrives).
+offline queue. Implements the link for FR-HMS-02/03/04, FR-HMS-07 (heartbeat
+every 0.5 s), NFR-HMS-01 (an ORDER_LIST is stored and acknowledged as soon as
+it arrives) and NFR-SEC-05 (a password check answered within 500 ms).
 
 Every message to the HMS except HEARTBEAT and AUTH_REQUEST is kept until the
 HMS acknowledges it. While the link is down, messages wait in an outbox kept in
@@ -61,8 +62,6 @@ class HmsComm:
         self._order_handler = None
         self._alive = False
         self._network = True
-        self.users = []
-        self.refused = []
 
     # ---- start and stop -------------------------------------------------------
     def start(self):
@@ -79,9 +78,6 @@ class HmsComm:
         self._network = up
         if not up:
             self._drop()
-
-    def networkAvailable(self):
-        return self._network
 
     # ---- exported operations ----------------------------------------------------
     def sendMessage(self, type_, body):
@@ -252,9 +248,8 @@ class HmsComm:
                     self._save()
                     self.syncQueue()
                     return
-                self.refused.append({"message": item, "reason": reason})
                 self._save()
-            self._say("HMS refused a message: %s" % reason)
+            self._say("HMS refused a %s message: %s" % (item["type"], reason))
             return
         if msg.type == "AUTH_RESULT":
             waiter = self._auth_waits.get(b.get("request"))
@@ -268,8 +263,6 @@ class HmsComm:
                 except Exception as e:
                     self._say("order list handler failed: %r" % e)
                     return
-        elif msg.type == "ROLE_UPDATE":
-            self.users = list(b.get("users", []))
-        else:
+        elif msg.type != "ROLE_UPDATE":         # roles are checked by the HMS; only acknowledged
             return
         self._send_raw("ACK", {"ack": msg.seq})

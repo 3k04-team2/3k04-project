@@ -1,11 +1,13 @@
 """1.3.3 Alarm Policy.
 
-Secret: which conditions sound the alarm and who may silence it ("REQ for
-alarm (c_alarmSound)"). Implements FR-SEC-05..07 and FR-HMS-05: every alarm and
-every disarm is logged with its reason, the time to disarm and optional notes,
-and sent to the HMS.
+Secret: which conditions sound the alarm ("REQ for alarm (c_alarmSound)").
+Implements FR-SEC-06: the door sensor's "forced" and "tamper" events sound the
+alarm here. The State Machine reports the door left open too long (FR-SEC-05).
+Every alarm and disarm is written to the Event Logger with its reason, time to
+disarm and optional notes (FR-HMS-05) and sent to the HMS.
 
-An alarm stays Sounding until an administrator or technician disarms it.
+An alarm stays sounding until it is disarmed; who may disarm is decided by
+Authentication & Access Control (FR-SEC-07).
 """
 
 import threading
@@ -14,30 +16,25 @@ REASONS = {
     "FORCED_ENTRY": "cabinet forced open",
     "CABINET_DAMAGE": "cabinet damaged (tamper switch)",
     "DOOR_OPEN_TOO_LONG": "door open for more than 60 s",
-    "NOT_RETRIEVED": "medication not retrieved within 60 s of the request",
-    "INVALID_STATE": "invalid cabinet state",
 }
-DISARM_ROLES = ("Administrator", "Technician")
+DOOR_EVENTS = {"forced": "FORCED_ENTRY", "tamper": "CABINET_DAMAGE"}
 MAX_NOTES = 200
 
 
-class NotAllowed(Exception):
-    pass
-
-
 class AlarmPolicy:
-    def __init__(self, alarm_hw, timer, logger, comm):
+    def __init__(self, alarm_hw, timer, logger, comm, door):
         self._hw = alarm_hw
         self._timer = timer
         self._logger = logger
         self._comm = comm
         self._lock = threading.RLock()
         self._active = {}
+        door.registerDoorSensorHandler(self._on_door)
 
     def reportCondition(self, data):
         """data: {"condition": one of REASONS, "text": optional}. Returns True if a new alarm sounded."""
         reason = data["condition"]
-        text = data.get("text") or REASONS.get(reason, reason)
+        text = data.get("text") or REASONS[reason]
         with self._lock:
             if reason in self._active:
                 return False
@@ -53,10 +50,8 @@ class AlarmPolicy:
             return [{"reason": a["reason"], "text": a["text"], "time": a["time"],
                      "elapsed": self._timer.elapsed(a["timing"]) or 0.0} for a in self._active.values()]
 
-    def acknowledgeAlarm(self, userID, role, notes=""):
-        """Disarm every active alarm. Only administrators and technicians may (FR-SEC-07)."""
-        if role not in DISARM_ROLES:
-            raise NotAllowed("only an administrator or technician can disarm the alarm")
+    def acknowledgeAlarm(self, userID, notes=""):
+        """Disarm every active alarm; the caller has checked the user may (FR-SEC-07)."""
         notes = (notes or "")[:MAX_NOTES]
         with self._lock:
             cleared = list(self._active.values())
@@ -69,7 +64,7 @@ class AlarmPolicy:
                                            "time_to_disarm_s": round(took, 1), "notes": notes})
             self._comm.sendMessage("ALARM_CLEARED", {"alarm": a["reason"]})
         if cleared:
-            self._logger.flushLog(self._comm)
+            self._logger.flushLog()
         return [a["reason"] for a in cleared]
 
     def resetAlarms(self):
@@ -79,3 +74,7 @@ class AlarmPolicy:
                 self._timer.cancelTiming(a["timing"])
             self._active = {}
             self._hw.alarmOff()
+
+    def _on_door(self, event):
+        if event in DOOR_EVENTS:
+            self.reportCondition({"condition": DOOR_EVENTS[event]})

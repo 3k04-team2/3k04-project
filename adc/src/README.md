@@ -26,44 +26,45 @@ A typical run:
 
 ## Where each module is (`adc/src/adc/`)
 
-| PDF module | File | Class |
-|---|---|---|
-| 1 ADC Entire System | `cabinet.py` | `Cabinet` (builds and connects everything, power on/off) |
-| 1.1.1 Alarm Hardware | `hardware/alarm_hw.py` | `AlarmHardware` |
-| 1.1.2 Keyboard interface | `hardware/keyboard.py` | `Keyboard`, `InputEvent` |
-| 1.1.3 Display | `hardware/display.py` | `Display` (all screen wording in `MESSAGES`) |
-| 1.1.4 Door | `hardware/door.py` | `Door` (door, latch and tamper sensors) |
-| 1.1.5 Timer | `hardware/timer.py` | `Timer`, `SimulatedTimer` |
-| 1.1 (added) non-volatile storage | `hardware/nvram.py` | `Nvram` |
-| 1.2.1 Authentication & Access Control | `software/auth.py` | `AuthManager` |
-| 1.2.2 Inventory Manager | `software/inventory.py` | `InventoryManager` |
-| 1.2.3 Event Logger | `software/event_logger.py` | `EventLogger` |
-| 1.2.4 Communication with HMS | `software/hms_comm.py` | `HmsComm` |
-| 1.3.1 State Machine Manager | `behaviour/state_machine.py` | `StateMachine` |
-| 1.3.2 Dispensing Manager | `behaviour/dispensing.py` | `DispensingManager` |
-| 1.3.3 Alarm Policy | `behaviour/alarm_policy.py` | `AlarmPolicy` |
-| (simulation) cabinet panel | `ui/panel.py`, `ui/panel.html` | `Panel` |
+| PDF module | File | Class | Owns |
+|---|---|---|---|
+| 1 ADC Entire System | `cabinet.py` | `Cabinet` | builds and connects the modules in layer order, power on/off, the 50 ms tick |
+| 1.1.1 Alarm Hardware | `hardware/alarm_hw.py` | `AlarmHardware` | the siren |
+| 1.1.2 Keyboard interface | `hardware/keyboard.py` | `Keyboard` | keypad, badge and scanner input |
+| 1.1.3 Display | `hardware/display.py` | `Display` | the screen; all wording is in `MESSAGES` |
+| 1.1.4 Door | `hardware/door.py` | `Door` | latch, door and tamper sensors; reports `forced` when opened while latched |
+| 1.1.5 Timer | `hardware/timer.py` | `Timer`, `SimulatedTimer` | the clock |
+| 1.1 (added) non-volatile storage | `hardware/nvram.py` | `Nvram` | data that survives a power cut |
+| 1.2.1 Authentication & Access Control | `software/auth.py` | `AuthManager` | HMS login check, failed-attempt count, lockout, session, service roles |
+| 1.2.2 Inventory Manager | `software/inventory.py` | `InventoryManager` | compartments, deposit checks, quantity confirmation, inventory and capacity reports |
+| 1.2.3 Event Logger | `software/event_logger.py` | `EventLogger` | the local log and `LOG_BATCH` uploads |
+| 1.2.4 Communication with HMS | `software/hms_comm.py` | `HmsComm` | the TCP link, heartbeat, acknowledgements, outbox |
+| 1.3.1 State Machine Manager | `behaviour/state_machine.py` | `StateMachine` | states and transitions, door locking, relock, door-open limit, session timeout, forced/tamper lockout |
+| 1.3.2 Dispensing Manager | `behaviour/dispensing.py` | `DispensingManager` | the user's inputs, order selection, dispense and deposit, order status to the HMS |
+| 1.3.3 Alarm Policy | `behaviour/alarm_policy.py` | `AlarmPolicy` | raising alarms (forced entry, cabinet damage, door open too long) and disarming |
+| (simulation) cabinet panel | `ui/panel.py`, `ui/panel.html` | `Panel` | the web page that stands in for the physical cabinet |
 
-`adc/src/adc_main.py` starts a cabinet and its panel. It is not called `main.py` because the monitor's tests put `adc/src` on the import path and import the monitor's `main.py`.
-`adc/src/adc_sim.py` is the older command-line cabinet simulator, which the monitor tests still use.
+`adc/src/adc_main.py` starts a cabinet and its panel. It is not called `main.py` because the ADC tests put both `adc/src` and `monitor/src` on the import path and import the monitor's `main.py`.
+The older command-line cabinet simulator that the monitor tests use is in `monitor/tests/adc_sim.py`.
 
 ## Requirements to code
 
-| Requirement | Where |
-|---|---|
-| FR-DSP-01/02, NFR-DSP-01 | `DispensingManager._in_select_order`, `_in_dispense`, `startDispense`, `confirmRetrieval` |
-| FR-SEC-01/02/03, NFR-SEC-01/05 | `AuthManager.authenticate` (HMS check, 500 ms limit in `HmsComm.checkAuth`), `DispensingManager._in_login` |
-| FR-SEC-04 | `DispensingManager._in_reset`, `AuthManager.verifyService` / `clearLockedOut` |
-| FR-SEC-05/06/07/08, NFR-SEC-02/04 | `AlarmPolicy`, `DispensingManager._on_door`, `_security`, `handleTimeout` (50 ms tick in `Cabinet`) |
-| FR-SEC-09, FR-SEC-10 | `DispensingManager.handleTimeout` (5 min session, 10 s relock) |
-| FR-IVT-01/05 | `InventoryManager` |
-| FR-IVT-02/03/04 | `DispensingManager._in_scan_deposit`, `_in_confirm_quantity` |
-| FR-HMS-01/05 | `EventLogger` (`LOG_BATCH`), `EVENT` in `DispensingManager._record_movement`, `AlarmPolicy.acknowledgeAlarm` |
-| FR-HMS-02, NFR-HMS-01 | `HmsComm` (`ORDER_LIST` + ACK), `DispensingManager.handleNewOrder`, `InventoryManager.reconcile` |
-| FR-HMS-03 | `ORDER_STATUS` (Stocked / Fulfilled) in `DispensingManager` |
-| FR-HMS-04 | `INVENTORY` with `capacity_warning` in `DispensingManager._send_inventory` |
-| FR-HMS-06 | `Nvram` + `InventoryManager`, `AuthManager` (lockout), `EventLogger`, `HmsComm` outbox |
-| FR-HMS-07 | `HmsComm._beat` (every 0.5 s) |
+| Requirement | Module | Where |
+|---|---|---|
+| FR-DSP-01 | Dispensing Manager | `DispensingManager._in_select_order`, `_in_dispense` (`WITHDRAW_ROLES`), `startDispense` |
+| FR-DSP-02 | Dispensing Manager, Display | `DispensingManager.startDispense` shows `ORDER_DETAILS` on the `Display` |
+| FR-SEC-01/03, NFR-SEC-01/05 | Auth & Access Control | `AuthManager.authenticate` (HMS check, 500 ms limit in `HmsComm.checkAuth`) |
+| FR-SEC-02 | Auth, State Machine Manager | `AuthManager.authenticate` / `lockOut`, `StateMachine` (`LOCKED_OUT`) |
+| FR-SEC-04/07 | Auth & Access Control | `AuthManager.verifyService` (`SERVICE_ROLES`), `clearLockedOut` |
+| FR-SEC-05/08/09/10, NFR-SEC-02/04 | State Machine Manager | `StateMachine._timed_event` (5 min session, 10 s relock, 60 s door limit), `_on_door`, `_enter` |
+| FR-SEC-06 | Alarm Policy | `AlarmPolicy._on_door`, `reportCondition`, `acknowledgeAlarm` |
+| FR-IVT-01 to 05 | Inventory Manager | `InventoryManager.checkDeposit`, `confirmQuantity`, `recordDeposit`, `recordDispense` |
+| FR-HMS-01/05 | Event Logger | `EventLogger.logEvent`, `flushLog` (`LOG_BATCH`) |
+| FR-HMS-02, NFR-HMS-01 | Comm, Inventory | `HmsComm` (`ORDER_LIST` + ACK), `InventoryManager.reconcile` |
+| FR-HMS-03 | Comm, Dispensing | `ORDER_STATUS` (Stocked / Fulfilled) from `DispensingManager` through `HmsComm` |
+| FR-HMS-04 | Comm, Inventory | `InventoryManager._report` (`EVENT`, `INVENTORY` with `capacity_warning`) |
+| FR-HMS-06 | Inventory | `InventoryManager` saved to `Nvram` |
+| FR-HMS-07 | Comm | `HmsComm._beat` (every 0.5 s) |
 
 ## Design decisions made while coding
 

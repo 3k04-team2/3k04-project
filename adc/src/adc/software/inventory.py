@@ -2,7 +2,12 @@
 
 Secret: how orders and their compartments are recorded (c_orderInventoryRecord,
 c_orderLocationRecord) and kept in non-volatile storage so they survive a power
-loss (FR-IVT-01, FR-IVT-05, FR-HMS-06).
+loss, and the rules for what may be deposited.
+
+Implements FR-IVT-01 and FR-IVT-05 (every order and its compartment),
+FR-IVT-02/03/04 (deposit blocked for another ADC's order, a full cabinet or an
+unconfirmed quantity), FR-HMS-02 (reconcile with the HMS order list), FR-HMS-04
+(inventory status with the 95 % warning) and FR-HMS-06.
 
 Order status here: Pending (on the HMS list, not stocked yet), Stocked,
 Fulfilled, Cancelled.
@@ -11,14 +16,18 @@ Fulfilled, Cancelled.
 import threading
 
 KEEP_FINISHED = 200
+CAPACITY_WARNING = 0.95
 
 
 class InventoryManager:
-    def __init__(self, nvram, capacity):
+    def __init__(self, adc_id, nvram, capacity, comm):
+        self._id = adc_id
         self._nvram = nvram
         self._capacity = capacity
+        self._comm = comm
         self._lock = threading.RLock()
         self._orders = nvram.read("inventory", {}).get("orders", {})
+        self._confirmed = set()         # orders whose quantity the pharmacist confirmed (FR-IVT-04)
 
     # ---- orders from the HMS ------------------------------------------------
     def addPendingOrder(self, orderID, orderDetails, compartmentID):
@@ -68,18 +77,48 @@ class InventoryManager:
             self._save()
             return True
 
+    # ---- deposit rules (FR-IVT-02/03/04) -------------------------------------------
+    def checkDeposit(self, orderID, destinationADC):
+        """(None, compartment) if the scanned package may be stocked, else (reason, None)."""
+        with self._lock:
+            o = self._orders.get(orderID)
+            if destinationADC != self._id:
+                return "wrong ADC", None
+            if o is None or o["status"] not in ("Pending", "Stocked"):
+                return "not on order list", None
+            if o["status"] == "Stocked":
+                return "already stocked", None
+            if self.isFull():
+                return "cabinet full", None
+            k = o["compartment"] if self._is_free(o["compartment"]) else self.getFreeCompartment()
+            return None, k
+
+    def confirmQuantity(self, orderID, matches):
+        """The pharmacist's count; a deposit is only recorded after a match."""
+        with self._lock:
+            if matches:
+                self._confirmed.add(orderID)
+            else:
+                self._confirmed.discard(orderID)
+            return bool(matches)
+
     # ---- physical deposits and withdrawals ----------------------------------------
     def recordDeposit(self, orderID, compartmentID):
         with self._lock:
+            if orderID not in self._confirmed:
+                raise ValueError("quantity of %s not confirmed" % orderID)
+            self._confirmed.discard(orderID)
             cur = self._orders[orderID]
             cur["compartment"] = compartmentID
             cur["status"] = "Stocked"
             self._save()
+        self._report("deposit", orderID)
 
     def recordDispense(self, orderID):
         with self._lock:
             self._orders[orderID]["status"] = "Fulfilled"
             self._save()
+        self._report("withdraw", orderID)
 
     # ---- queries -------------------------------------------------------------------
     def getOrder(self, orderID):
@@ -99,22 +138,14 @@ class InventoryManager:
         """True if the order is physically inside the cabinet."""
         return self.getOrderStatus(orderID) == "Stocked"
 
-    def isCompartmentFree(self, compartmentID):
-        with self._lock:
-            return (isinstance(compartmentID, int) and 0 <= compartmentID < self._capacity
-                    and all(not (o["status"] == "Stocked" and o["compartment"] == compartmentID)
-                            for o in self._orders.values()))
-
     def getFreeCompartment(self):
         for k in range(self._capacity):
-            if self.isCompartmentFree(k):
+            if self._is_free(k):
                 return k
         return None
 
     def listInventory(self):
-        with self._lock:
-            return sorted(((oid, o["compartment"]) for oid, o in self._orders.items()
-                           if o["status"] == "Stocked"), key=lambda x: x[1])
+        return [(o["order"], o["compartment"]) for o in self.stocked()]
 
     def stocked(self):
         with self._lock:
@@ -138,10 +169,21 @@ class InventoryManager:
     def isFull(self):
         return self.occupancy() >= self._capacity
 
-    def report(self):
-        """Compartment list for the INVENTORY message."""
-        return [{"compartment": o["compartment"], "medication": o["medication"], "quantity": o["quantity"]}
-                for o in self.stocked()]
+    # ---- internals -------------------------------------------------------------------
+    def _is_free(self, k):
+        return (isinstance(k, int) and 0 <= k < self._capacity
+                and all(not (o["status"] == "Stocked" and o["compartment"] == k) for o in self._orders.values()))
+
+    def _report(self, kind, orderID):
+        """The movement (EVENT) and the inventory status with the 95 % warning (FR-HMS-04)."""
+        o = self.getOrder(orderID)
+        self._comm.sendMessage("EVENT", {"kind": kind, "order": orderID, "medication": o["medication"],
+                                         "quantity": o["quantity"], "compartment": o["compartment"]})
+        level = self.level()
+        self._comm.sendMessage("INVENTORY", {
+            "compartments": [{"compartment": s["compartment"], "medication": s["medication"],
+                              "quantity": s["quantity"]} for s in self.stocked()],
+            "occupancy": round(level, 3), "capacity_warning": level >= CAPACITY_WARNING})
 
     def _save(self):
         finished = [oid for oid, o in self._orders.items() if o["status"] in ("Fulfilled", "Cancelled")]

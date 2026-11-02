@@ -6,8 +6,11 @@ communication module); this module never stores them. The failure count and
 the lockout flag are kept in non-volatile storage so cutting the power does not
 undo a lockout.
 
-Implements FR-SEC-01..04, FR-SEC-09, NFR-SEC-01 (warning on the 3rd failure)
-and NFR-SEC-05 (the HMS link answers within 500 ms or the login is refused).
+Implements FR-SEC-01/02/03 (who may log in, counting failures, the lockout on
+the 5th), FR-SEC-04 and FR-SEC-07 (only an administrator or technician may
+reset a lockout or disarm the alarm), the session record behind FR-SEC-09,
+NFR-SEC-01 (warning on the 3rd failure) and NFR-SEC-05 (the HMS link answers
+within 500 ms or the login is refused).
 """
 
 import threading
@@ -73,16 +76,18 @@ class AuthManager:
             return AuthResult(True, role=role)
 
     def verifyService(self, userId, password):
-        """Check an administrator/technician for reset or disarm. Returns the role or None.
+        """Check an administrator/technician for reset, disarm or maintenance (FR-SEC-04/07).
 
         Does not start a session and does not count toward the lockout, so a
-        locked-out cabinet can still be reset.
+        locked-out cabinet can still be reset. reason: "unreachable", "denied" or "role".
         """
         status, role = self._comm.checkAuth(userId, password)
         ok = status == "ok" and role in SERVICE_ROLES
         self._logger.logEvent("SERVICE_AUTH" if ok else "SERVICE_AUTH_FAILED", user=userId,
                               details={"role": role or "", "status": status})
-        return role if ok else None
+        if ok:
+            return AuthResult(True, role=role)
+        return AuthResult(False, role=role or "", reason="role" if status == "ok" else status)
 
     # ---- the session ----------------------------------------------------------------
     def endSession(self):

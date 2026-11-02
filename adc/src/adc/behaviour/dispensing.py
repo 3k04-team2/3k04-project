@@ -1,13 +1,17 @@
 """1.3.2 Dispensing Manager.
 
-Secret: the exact workflow and timing of the cabinet: login, showing an order
-before it is dispensed, unlocking, the 10 s relock, the 60 s limits, the
-pharmacist deposit checks, and what is sent to the HMS when a transaction ends.
-It receives every input event and door-sensor event, asks the State Machine
-for the next mode and the Alarm Policy to sound alarms.
+Secret: the exact workflow of a transaction: logging in, showing an order
+before it is dispensed, unlocking for a withdrawal or a deposit, the
+pharmacist's scan and quantity prompt, what happens when the compartment is
+used and the door closes, and the order status sent to the HMS.
 
-Implements FR-DSP-01/02, FR-SEC-02/03/04/08/09/10, FR-IVT-01..05,
-FR-HMS-01/03/04, NFR-DSP-01, NFR-SEC-01/02/04.
+Implements FR-DSP-01 (dispense the specified order; an order that is not
+stocked is refused), FR-DSP-02 (the order ID and medication are shown before
+dispensing) and FR-HMS-03 (ORDER_STATUS when an order is stocked or fulfilled).
+It receives every keyboard input and the door's opened/closed events, and asks
+Authentication (who may act), the Inventory Manager (what may be stocked), the
+State Machine (the next mode), the Alarm Policy (disarm) and the Event Logger
+(the FR-HMS-01 record of each withdrawal and deposit).
 
 Waiting for the HMS to check a password (up to 500 ms) happens outside the
 lock, so the timers and the alarm keep running meanwhile.
@@ -16,17 +20,12 @@ lock, so the timers and the alarm keep running meanwhile.
 import threading
 
 from adc.behaviour import state_machine as sm
-from adc.behaviour.alarm_policy import NotAllowed
-from adc.software.auth import WARN_AFTER
 
-RELOCK_AFTER = 10.0
-DOOR_OPEN_LIMIT = 60.0
-RETRIEVE_LIMIT = 60.0
-CAPACITY_WARNING = 0.95
 WITHDRAW_ROLES = ("Doctor", "Nurse")
 DEPOSIT_ROLES = ("Pharmacist",)
-UNLOCKED_STATES = (sm.DISPENSE, sm.DEPOSIT, sm.DOOR_OPEN)
 SERVICE_INPUTS = ("dismiss", "reset", "disarm", "logout", "maintenance")
+DEPOSIT_BLOCKS = {"wrong ADC": "WRONG_ADC", "not on order list": "NOT_ASSIGNED",
+                  "already stocked": "ALREADY_STOCKED", "cabinet full": "CABINET_FULL"}
 
 
 def _ok(message="", **extra):
@@ -38,10 +37,8 @@ def _fail(message, **extra):
 
 
 class DispensingManager:
-    def __init__(self, adc_id, timer, display, door, keyboard, alarm_hw, alarms, machine,
-                 auth, inventory, logger, comm):
+    def __init__(self, adc_id, display, door, keyboard, alarm_hw, alarms, machine, auth, inventory, logger, comm):
         self._id = adc_id
-        self._timer = timer
         self._display = display
         self._door = door
         self._alarm_hw = alarm_hw
@@ -55,16 +52,10 @@ class DispensingManager:
         self._tx = None                 # the open transaction (unlocked door)
         self._selected = None           # order shown on screen, not yet dispensed (FR-DSP-02)
         self._pending_deposit = None    # order scanned, waiting for the quantity check (FR-IVT-04)
-        self._capacity_flagged = inventory.level() >= CAPACITY_WARNING
         keyboard.registerInputHandler(self.handleInput)
         door.registerDoorSensorHandler(self._on_door)
         comm.registerNewOrderHandler(self.handleNewOrder)
         machine.registerStateListener(self._on_state)
-        door.lockDoor()
-        if machine.getState() == sm.LOCKED_OUT:
-            display.showBlockingMessage("LOCKED_OUT")
-        else:
-            display.showMessage("IDLE")
 
     # ---- inputs -------------------------------------------------------------------
     def handleInput(self, event):
@@ -95,13 +86,13 @@ class DispensingManager:
                 return _ok(self._display.showMessage("WELCOME", user=user, role=res.role),
                            access="granted", role=res.role)
             if self._auth.isLockedOut():
-                self._lockout("5 failed login attempts")
+                self._machine.handleEvent("FAILED_LOGIN_LIMIT")
                 return _fail(self._display.read()["blocking"], access="denied", lockedOut=True)
             if res.reason == "unreachable":
                 return _fail(self._display.showMessage("HMS_UNREACHABLE", 10), access="denied")
             if res.reason == "role":
                 return _fail(self._display.showMessage("ROLE_NOT_ALLOWED", 10, role=res.role), access="denied")
-            if res.failures >= WARN_AFTER:
+            if res.warning:
                 return _fail(self._display.showMessage("LOGIN_WARNING", count=res.failures),
                              access="denied", warning=True)
             return _fail(self._display.showMessage("ACCESS_DENIED", 5), access="denied")
@@ -123,9 +114,7 @@ class DispensingManager:
             problem = self._need(sm.AUTHORIZED, WITHDRAW_ROLES)
             if problem:
                 return problem
-            self._auth.refreshSession()
             if not self._inventory.isOrderPresented(oid):
-                # FR-DSP-01: dispensing of that order is refused; the user stays logged in to retry
                 self._selected = None
                 self._logger.logEvent("INVALID_ORDER", user=self._auth.getCurrentUser(), details={"order": oid})
                 return _fail(self._display.showMessage("INVALID_ORDER", order=oid or "(blank)"))
@@ -153,38 +142,28 @@ class DispensingManager:
             problem = self._need(sm.AUTHORIZED, DEPOSIT_ROLES)
             if problem:
                 return problem
-            self._auth.refreshSession()
             self._pending_deposit = None
-            o = self._inventory.getOrder(oid)
-            if destination != self._id:
-                return self._block_deposit(oid, "wrong ADC", "WRONG_ADC", order=oid,
-                                           destination=destination, adc=self._id)
-            if o is None or o["status"] not in ("Pending", "Stocked"):
-                return self._block_deposit(oid, "not on order list", "NOT_ASSIGNED", order=oid or "(blank)")
-            if o["status"] == "Stocked":
-                return self._block_deposit(oid, "already stocked", "ALREADY_STOCKED", order=oid,
-                                           compartment=o["compartment"])
-            if self._inventory.isFull():
-                return self._block_deposit(oid, "cabinet full", "CABINET_FULL",
+            reason, k = self._inventory.checkDeposit(oid, destination)
+            if reason:
+                return self._block_deposit(oid, reason, DEPOSIT_BLOCKS[reason], order=oid or "(blank)",
+                                           destination=destination, adc=self._id,
+                                           compartment=self._inventory.getCompartment(oid),
                                            capacity=self._inventory.capacity())
-            k = o["compartment"] if self._inventory.isCompartmentFree(o["compartment"]) \
-                else self._inventory.getFreeCompartment()
+            o = self._inventory.getOrder(oid)
             self._pending_deposit = dict(o, compartment=k)
             return _ok(self._display.showMessage("CONFIRM_QUANTITY", order=oid, medication=o["medication"],
                                                  quantity=o["quantity"]),
                        prompt="confirm_quantity", order=self._pending_deposit)
 
     def _in_confirm_quantity(self, d):
-        matches = d.get("matches") is True
         with self._lock:
             problem = self._need(sm.AUTHORIZED, DEPOSIT_ROLES)
             if problem:
                 return problem
-            p = self._pending_deposit
+            p, self._pending_deposit = self._pending_deposit, None
             if p is None:
                 return _fail("Scan an order first.")
-            self._pending_deposit = None
-            if not matches:
+            if not self._inventory.confirmQuantity(p["order"], d.get("matches") is True):
                 return self._block_deposit(p["order"], "quantity not confirmed", "QUANTITY_NOT_CONFIRMED",
                                            order=p["order"])
             if not self._door.isDoorClosed():
@@ -224,26 +203,25 @@ class DispensingManager:
             return _ok()
 
     def _in_reset(self, d):
-        """FR-SEC-04: only an administrator or technician leaves Locked Out (or Invalid)."""
+        """FR-SEC-04: leaving Locked Out (or Invalid) needs an administrator or technician."""
         with self._lock:
-            st = self._machine.getState()
-            if st not in (sm.LOCKED_OUT, sm.INVALID):
+            if self._machine.getState() not in (sm.LOCKED_OUT, sm.INVALID):
                 return _fail("The cabinet is not locked out.")
             if not self._door.isDoorClosed():
                 return _fail("Close the door before resetting.")
             if self._door.isTampered():
                 return _fail("The tamper switch is still active; repair the cabinet first.")
-        user, role, problem = self._verify_service(d, "can reset")
-        if problem:
-            return problem
+        user = str(d.get("user", ""))
+        res = self._auth.verifyService(user, str(d.get("password", "")))
         with self._lock:
+            if not res.ok:
+                return self._service_refused(res, "can reset")
             if self._machine.getState() not in (sm.LOCKED_OUT, sm.INVALID):
                 return _fail("The cabinet is not locked out.")
             self._auth.clearLockedOut(user)
             self._machine.handleEvent("RESET")
-            self._display.clearBlockingMessage()
-            self._logger.logEvent("RESET", user=user, details={"role": role})
-            self._logger.flushLog(self._comm)
+            self._logger.logEvent("RESET", user=user, details={"role": res.role})
+            self._logger.flushLog()
             msg = self._display.showMessage("RESET_DONE", 10, user=user)
             if self._alarms.getActiveAlarm():
                 msg += " The alarm is still sounding; disarm it."
@@ -253,14 +231,12 @@ class DispensingManager:
         """FR-SEC-07."""
         if not self._alarms.getActiveAlarm():
             return _fail("No alarm is sounding.")
-        user, role, problem = self._verify_service(d, "can disarm the alarm")
-        if problem:
-            return problem
+        user = str(d.get("user", ""))
+        res = self._auth.verifyService(user, str(d.get("password", "")))
         with self._lock:
-            try:
-                cleared = self._alarms.acknowledgeAlarm(user, role, str(d.get("notes", "")))
-            except NotAllowed as e:
-                return _fail("Access denied: %s." % e)
+            if not res.ok:
+                return self._service_refused(res, "can disarm the alarm")
+            cleared = self._alarms.acknowledgeAlarm(user, str(d.get("notes", "")))
             return _ok(self._display.showMessage("ALARM_DISARMED", 10, user=user), cleared=cleared)
 
     def _in_maintenance(self, d):
@@ -268,10 +244,11 @@ class DispensingManager:
         with self._lock:
             if self._machine.getState() != sm.IDLE:
                 return _fail("Maintenance mode can only change while the cabinet is idle.")
-        user, role, problem = self._verify_service(d, "can change maintenance mode")
-        if problem:
-            return problem
+        user = str(d.get("user", ""))
+        res = self._auth.verifyService(user, str(d.get("password", "")))
         with self._lock:
+            if not res.ok:
+                return self._service_refused(res, "can change maintenance mode")
             self._machine.setMaintenanceMode(enable)
             if enable:
                 self._alarm_hw.alarmSuppression()
@@ -285,7 +262,6 @@ class DispensingManager:
         with self._lock:
             o = self._inventory.getOrder(orderID)
             self._open_tx("withdraw", o)
-            self._tx["request"] = self._timer.startTiming()
             self._selected = None
             self._logger.logEvent("DISPENSE_REQUESTED", user=self._auth.getCurrentUser(),
                                   details={"order": orderID, "medication": o["medication"],
@@ -299,7 +275,7 @@ class DispensingManager:
                 return False
             self._logger.logEvent("TRANSACTION_CANCELLED", user=self._auth.getCurrentUser(),
                                   details={"order": self._tx["order"] if self._tx else ""})
-            self._close_tx()
+            self._tx = None
             self._machine.handleEvent("CANCEL")
             return True
 
@@ -311,53 +287,20 @@ class DispensingManager:
             tx["done"] = True
             self._record_movement("withdraw", tx)
             self._comm.sendMessage("ORDER_STATUS", {"orders": [{"order": tx["order"], "status": "Fulfilled"}]})
-            self._send_inventory()
             return {"event": "retrieved", "order": tx["order"]}
 
-    def handleTimeout(self):
-        """Called every tick: session timeout, 10 s relock, 60 s limits (handleTimeout(timer) in the PDF)."""
+    def handleTimeout(self, timer=None):
+        """Called every 50 ms: the State Machine checks its timed transitions."""
         with self._lock:
-            st = self._machine.getState()
-            tx = self._tx
-            if st == sm.AUTHORIZED:
-                active, _ = self._auth.checkSessionTime()
-                if not active:
-                    self._logger.logEvent("SESSION_TIMEOUT", user=self._auth.getCurrentUser())
-                    self._machine.handleEvent("INACTIVE")
-                    self._display.showMessage("SESSION_TIMEOUT", 10)
-            elif st in (sm.DISPENSE, sm.DEPOSIT) and tx is not None:
-                if self._door.isDoorClosed() and (self._timer.elapsed(tx["unlock"]) or 0) >= RELOCK_AFTER:
-                    self._logger.logEvent("RELOCKED", user=self._auth.getCurrentUser(), details={"order": tx["order"]})
-                    self._close_tx()
-                    self._machine.handleEvent("RELOCK_TIMEOUT")
-                    self._display.showMessage("RELOCKED", 10)
-            elif st == sm.DOOR_OPEN and tx is not None:
-                if (self._timer.elapsed(tx["door"]) or 0) > DOOR_OPEN_LIMIT:
-                    self._alarms.reportCondition({"condition": "DOOR_OPEN_TOO_LONG"})
-                    self._logger.logEvent("INVALID_STATE", details={"reason": "door open more than 60 s"})
-                    self._machine.handleEvent("DOOR_OPEN_TIMEOUT")
-                    self._display.showBlockingMessage("INVALID_STATE", reason="door open more than 60 s")
-            tx = self._tx
-            if (tx is not None and tx["mode"] == "withdraw" and not tx["done"] and not tx.get("late")
-                    and (self._timer.elapsed(tx.get("request")) or 0) > RETRIEVE_LIMIT):
-                tx["late"] = True
-                self._alarms.reportCondition({"condition": "NOT_RETRIEVED"})
-
-    tick = handleTimeout
+            self._machine.handleEvent("TICK")
 
     def getDispenseStatus(self):
         with self._lock:
             tx = self._tx
-            out = {"state": self._machine.getState(), "selected": self._selected,
-                   "pending_deposit": self._pending_deposit, "transaction": None}
-            if tx is not None:
-                out["transaction"] = {
-                    "mode": tx["mode"], "order": tx["order"], "medication": tx["medication"],
-                    "quantity": tx["quantity"], "compartment": tx["compartment"], "done": tx["done"],
-                    "relock_in": max(0.0, RELOCK_AFTER - (self._timer.elapsed(tx["unlock"]) or 0))
-                    if self._machine.getState() in (sm.DISPENSE, sm.DEPOSIT) else None,
-                    "door_open_for": self._timer.elapsed(tx["door"]) if tx.get("door") else None}
-            return out
+            return dict(self._machine.getTimers(), state=self._machine.getState(), selected=self._selected,
+                        pending_deposit=self._pending_deposit,
+                        transaction={k: tx[k] for k in ("mode", "order", "medication", "quantity",
+                                                        "compartment", "done")} if tx else None)
 
     def handleNewOrder(self, orders):
         """ORDER_LIST from the HMS (FR-HMS-02); called on the HMS link's thread."""
@@ -380,70 +323,47 @@ class DispensingManager:
 
     # ---- door sensor (interrupts) ----------------------------------------------------------
     def _on_door(self, event):
+        """Opening and closing during a transaction; forced entry and tamper go to the
+        Alarm Policy and the State Machine."""
         with self._lock:
             self._auth.refreshSession()
-            st = self._machine.getState()
-            if event == "tamper":
-                self._security("CABINET_DAMAGE", "tamper switch triggered")
-            elif event == "opened":
-                if st in (sm.DISPENSE, sm.DEPOSIT) and not self._door.isLocked():
-                    tx = self._tx
-                    self._timer.cancelTiming(tx["unlock"])
-                    tx["door"] = self._timer.startTiming()
-                    self._auth.refreshSession()
-                    self._machine.handleEvent("DOOR_OPENED")
-                    self._display.showMessage("TAKE_MEDICATION" if tx["mode"] == "withdraw" else "PLACE_MEDICATION",
-                                              medication=tx["medication"], quantity=tx["quantity"],
-                                              compartment=tx["compartment"])
-                else:
-                    self._security("FORCED_ENTRY", "door opened while latched")   # NAT-01
+            st, tx = self._machine.getState(), self._tx
+            if event == "opened" and st in (sm.DISPENSE, sm.DEPOSIT):
+                self._machine.handleEvent("DOOR_OPENED")
+                self._display.showMessage("TAKE_MEDICATION" if tx["mode"] == "withdraw" else "PLACE_MEDICATION",
+                                          medication=tx["medication"], quantity=tx["quantity"],
+                                          compartment=tx["compartment"])
             elif event == "closed" and st == sm.DOOR_OPEN:
-                tx = self._tx
-                self._timer.cancelTiming(tx.get("door"))
-                tx["door"] = None
                 if tx["done"]:
                     self._machine.handleEvent("DOOR_CLOSED_DONE")
-                    self._logger.flushLog(self._comm)
+                    self._logger.flushLog()
                     key = "DISPENSE_COMPLETE" if tx["mode"] == "withdraw" else "DEPOSIT_COMPLETE"
                     self._machine.handleEvent("LOG_SENT")
                     self._display.showMessage(key, 10, order=tx["order"], compartment=tx["compartment"])
                 else:
-                    tx["unlock"] = self._timer.startTiming()
                     self._machine.handleEvent("RETURN_TO_DISPENSE" if tx["mode"] == "withdraw" else "RETURN_TO_DEPOSIT")
                     self._display.showMessage("DOOR_UNLOCKED")
 
-    def _on_state(self, old, new):
-        """Applies the cabinet-lock REQ table and ends the session when the cabinet locks."""
-        if new in UNLOCKED_STATES:
-            self._door.unlockDoor()
-        else:
-            self._door.lockDoor()
-        if new == sm.AUTHORIZED:
-            self._close_tx()
-            self._auth.refreshSession()
-        if new in (sm.IDLE, sm.LOCKED_OUT, sm.INVALID):
-            self._close_tx()
-            self._selected = self._pending_deposit = None
-            self._auth.endSession()
-        self._logger.logEvent("STATE", details={"from": old, "to": new})
+    def _on_state(self, old, new, event):
+        """A finished, cancelled or interrupted transaction is closed."""
+        with self._lock:
+            if new == sm.AUTHORIZED or new in sm.NO_SESSION_STATES:
+                self._tx = None
+            if new in sm.NO_SESSION_STATES:
+                self._selected = self._pending_deposit = None
 
     # ---- internals ------------------------------------------------------------------------------
-    def _verify_service(self, d, action):
-        """(user, role, failure reply) for an administrator/technician action; called outside the lock."""
-        user = str(d.get("user", ""))
-        role = self._auth.verifyService(user, str(d.get("password", "")))
-        if role is not None:
-            return user, role, None
-        if not self._comm.isConnected():
-            return user, None, _fail(self._display.showMessage("SERVICE_UNREACHABLE", 10))
-        return user, None, _fail("Access denied: only an administrator or technician %s." % action)
-
     def _need(self, state, roles):
         if self._machine.getState() != state:
             return _fail("Not possible in mode %s." % self._machine.getState())
         if self._auth.getCurrentRole() not in roles:
             return _fail("A %s cannot do this." % self._auth.getCurrentRole())
         return None
+
+    def _service_refused(self, res, action):
+        if res.reason == "unreachable":
+            return _fail(self._display.showMessage("SERVICE_UNREACHABLE", 10))
+        return _fail("Access denied: only an administrator or technician %s." % action)
 
     def _block_deposit(self, oid, reason, messageID, **params):
         self._logger.logEvent("DEPOSIT_BLOCKED", user=self._auth.getCurrentUser(),
@@ -452,15 +372,7 @@ class DispensingManager:
 
     def _open_tx(self, mode, o):
         self._tx = {"mode": mode, "order": o["order"], "medication": o["medication"], "quantity": o["quantity"],
-                    "compartment": o["compartment"], "user": self._auth.getCurrentUser(), "done": False,
-                    "unlock": self._timer.startTiming(), "door": None, "request": None}
-
-    def _close_tx(self):
-        tx, self._tx = self._tx, None
-        if tx:
-            for k in ("unlock", "door", "request"):
-                if tx.get(k):
-                    self._timer.cancelTiming(tx[k])
+                    "compartment": o["compartment"], "user": self._auth.getCurrentUser(), "done": False}
 
     def _finish_deposit(self):
         tx = self._tx
@@ -468,35 +380,9 @@ class DispensingManager:
         tx["done"] = True
         self._record_movement("deposit", tx)
         self._comm.sendMessage("ORDER_STATUS", {"orders": [{"order": tx["order"], "status": "Stocked"}]})
-        self._send_inventory()
 
     def _record_movement(self, kind, tx):
-        """FR-HMS-01: time, user, order number, medicine and quantity."""
-        details = {"order": tx["order"], "medication": tx["medication"], "quantity": tx["quantity"],
-                   "compartment": tx["compartment"]}
-        self._logger.logEvent(kind.upper(), user=tx["user"], details=details)
-        self._comm.sendMessage("EVENT", dict(details, kind=kind, user=tx["user"]))
-
-    def _send_inventory(self):
-        """FR-HMS-04: the inventory status carries a warning at 95 % capacity."""
-        level = self._inventory.level()
-        warn = level >= CAPACITY_WARNING
-        if warn and not self._capacity_flagged:
-            self._logger.logEvent("CAPACITY_WARNING", details={"level": round(level, 2)})
-        self._capacity_flagged = warn
-        self._comm.sendMessage("INVENTORY", {"compartments": self._inventory.report(),
-                                             "occupancy": round(level, 3), "capacity_warning": warn})
-
-    def _lockout(self, reason):
-        self._auth.lockOut(reason)
-        self._machine.handleEvent("FAILED_LOGIN_LIMIT")
-        self._display.showBlockingMessage("LOCKED_OUT")
-        self._logger.flushLog(self._comm)
-
-    def _security(self, condition, text):
-        """FR-SEC-06/08: forced entry or damage -> alarm on, Locked Out, cabinet locked."""
-        self._alarms.reportCondition({"condition": condition, "text": text})
-        self._auth.lockOut(text)
-        self._machine.handleEvent(condition)
-        self._display.showBlockingMessage("LOCKED_OUT")
-        self._logger.flushLog(self._comm)
+        """FR-HMS-01: time, user, order number, medicine and quantity (the logger adds the time)."""
+        self._logger.logEvent(kind.upper(), user=tx["user"],
+                              details={"order": tx["order"], "medication": tx["medication"],
+                                       "quantity": tx["quantity"], "compartment": tx["compartment"]})

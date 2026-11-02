@@ -161,12 +161,12 @@ function render(s) {
   $("message").textContent = s.display.message;
   $("modal").style.display = s.display.blocking ? "block" : "none";
   $("modaltext").textContent = s.display.blocking || "";
-  const tx = s.dispense.transaction;
+  const d = s.dispense, tx = d.transaction;
   rows("status", ["", ""], [
     ["Failed logins", s.failures + (s.locked_out ? " (locked out)" : "")],
     ["Transaction", tx ? tx.mode + " " + tx.order + (tx.done ? " (done)" : "") : "none"],
-    ["Relock in", tx && tx.relock_in != null ? tx.relock_in.toFixed(1) + " s" : "-"],
-    ["Door open for", tx && tx.door_open_for != null ? tx.door_open_for.toFixed(1) + " s" : "-"],
+    ["Relock in", d.relock_in != null ? d.relock_in.toFixed(1) + " s" : "-"],
+    ["Door open for", d.door_open_for != null ? d.door_open_for.toFixed(1) + " s" : "-"],
     ["Network cable", s.network ? "plugged" : "unplugged"],
   ]);
   rows("alarms", ["Reason", "Since", "Seconds"], s.alarm.active.map(a => [a.text, t(a.time), a.elapsed.toFixed(0)]));
