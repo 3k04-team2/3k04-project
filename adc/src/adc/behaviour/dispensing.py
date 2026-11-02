@@ -233,11 +233,10 @@ class DispensingManager:
                 return _fail("Close the door before resetting.")
             if self._door.isTampered():
                 return _fail("The tamper switch is still active; repair the cabinet first.")
-        user = str(d.get("user", ""))
-        role = self._auth.verifyService(user, str(d.get("password", "")))
+        user, role, problem = self._verify_service(d, "can reset")
+        if problem:
+            return problem
         with self._lock:
-            if role is None:
-                return _fail("Access denied: only an administrator or technician can reset.")
             if self._machine.getState() not in (sm.LOCKED_OUT, sm.INVALID):
                 return _fail("The cabinet is not locked out.")
             self._auth.clearLockedOut(user)
@@ -254,8 +253,9 @@ class DispensingManager:
         """FR-SEC-07."""
         if not self._alarms.getActiveAlarm():
             return _fail("No alarm is sounding.")
-        user = str(d.get("user", ""))
-        role = self._auth.verifyService(user, str(d.get("password", "")))
+        user, role, problem = self._verify_service(d, "can disarm the alarm")
+        if problem:
+            return problem
         with self._lock:
             try:
                 cleared = self._alarms.acknowledgeAlarm(user, role, str(d.get("notes", "")))
@@ -268,11 +268,10 @@ class DispensingManager:
         with self._lock:
             if self._machine.getState() != sm.IDLE:
                 return _fail("Maintenance mode can only change while the cabinet is idle.")
-        user = str(d.get("user", ""))
-        role = self._auth.verifyService(user, str(d.get("password", "")))
+        user, role, problem = self._verify_service(d, "can change maintenance mode")
+        if problem:
+            return problem
         with self._lock:
-            if role is None:
-                return _fail("Access denied: only an administrator or technician.")
             self._machine.setMaintenanceMode(enable)
             if enable:
                 self._alarm_hw.alarmSuppression()
@@ -429,6 +428,16 @@ class DispensingManager:
         self._logger.logEvent("STATE", details={"from": old, "to": new})
 
     # ---- internals ------------------------------------------------------------------------------
+    def _verify_service(self, d, action):
+        """(user, role, failure reply) for an administrator/technician action; called outside the lock."""
+        user = str(d.get("user", ""))
+        role = self._auth.verifyService(user, str(d.get("password", "")))
+        if role is not None:
+            return user, role, None
+        if not self._comm.isConnected():
+            return user, None, _fail(self._display.showMessage("SERVICE_UNREACHABLE", 10))
+        return user, None, _fail("Access denied: only an administrator or technician %s." % action)
+
     def _need(self, state, roles):
         if self._machine.getState() != state:
             return _fail("Not possible in mode %s." % self._machine.getState())

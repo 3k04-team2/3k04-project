@@ -1,6 +1,6 @@
 # ADC tests
 
-From the repo root: `py -m unittest discover -s adc/tests` (18 tests, about 2 s).
+From the repo root: `py -m unittest discover -s adc/tests` (19 tests, about 2 s).
 
 `test_adc.py` has three groups:
 

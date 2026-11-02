@@ -78,4 +78,4 @@ A typical run:
 
 ## Tests
 
-`py -m unittest discover -s adc/tests` (18 tests, about 2 s). See `adc/tests/README.md`.
+`py -m unittest discover -s adc/tests` (19 tests, about 2 s). See `adc/tests/README.md`.

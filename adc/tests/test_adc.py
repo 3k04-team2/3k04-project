@@ -291,6 +291,17 @@ class CabinetTests(unittest.TestCase):
         self.assertEqual(self.cab.auth.failures(), 0)
         self.assertEqual(self.state(), sm.IDLE)
 
+    def test_reset_while_hms_unreachable_says_so(self):
+        self.cab.set_tamper(True)
+        self.cab.set_tamper(False)
+        self.comm.connected = False
+        r = self.press("reset", user="tech1", password="pw")
+        self.assertFalse(r["ok"])
+        self.assertIn("Cannot reach the HMS", r["message"])
+        self.assertEqual(self.state(), sm.LOCKED_OUT)
+        self.comm.connected = True
+        self.assertTrue(self.press("reset", user="tech1", password="pw")["ok"])
+
     def test_admin_cannot_open_cabinet(self):
         r = self.press("login", user="admin1", password="pw")
         self.assertFalse(r["ok"])
@@ -340,7 +351,7 @@ class HmsRoundTripTests(unittest.TestCase):
         from hms.host import SimulatedHost
         from main import System
         self.tmp = tempfile.mkdtemp()
-        self.host = SimulatedHost(start=time.time())
+        self.host = SimulatedHost(start=time.time() - 7200)       # HMS clock 2 h off, as in a --sim-host demo
         self.sys = System(os.path.join(self.tmp, "hms"), self.host, adc_port=0, ui_port=0)
         self.sys.start()
         self.cab = Cabinet("ADC-7", "127.0.0.1", self.sys.adc_port, 8, os.path.join(self.tmp, "adc"),
