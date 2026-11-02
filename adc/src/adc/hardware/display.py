@@ -38,7 +38,8 @@ MESSAGES = {
     "QUANTITY_NOT_CONFIRMED": "Quantity not confirmed for order {order}. Deposit blocked.",
     "DEPOSIT_COMPLETE": "Order {order} stocked in compartment {compartment}.",
     "DISPENSE_COMPLETE": "Order {order} dispensed.",
-    "INVALID_STATE": "INVALID STATE: {reason}. An administrator or technician must reset the cabinet.",
+    "INVALID_STATE": "INVALID STATE: {reason}. Close the door to continue.",
+    "INVALID_CLEARED": "Door closed; the cabinet is locked again. Order {order} was not completed.",
     "ALARM_DISARMED": "Alarm disarmed by {user}.",
     "RESET_DONE": "Cabinet reset by {user}.",
 }

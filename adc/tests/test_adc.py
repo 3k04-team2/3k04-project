@@ -168,7 +168,7 @@ class CabinetTests(unittest.TestCase):
         self.assertTrue(self.cab.door.isLocked())
         self.assertEqual(self.cab.inventory.getOrderStatus("ORD-1"), "Pending")
 
-    def test_door_open_too_long_goes_invalid_and_alarms(self):
+    def open_door_too_long(self):
         self.login("pharmacist1")
         self.press("scan_deposit", order="ORD-1")
         self.press("confirm_quantity", matches=True)
@@ -179,19 +179,43 @@ class CabinetTests(unittest.TestCase):
         self.assertEqual(self.state(), sm.INVALID)
         self.assertTrue(self.cab.alarm_hw.isSounding())
         self.assertEqual(self.comm.of("ALARM")[0]["alarm"], "DOOR_OPEN_TOO_LONG")
-        self.assertFalse(self.press("reset", user="tech1", password="pw")["ok"])      # door still open
+        self.assertEqual(self.cab.auth.getCurrentUser(), "pharmacist1")
+
+    def test_door_open_too_long_goes_invalid_until_closed(self):
+        self.open_door_too_long()
+        self.assertFalse(self.press("dismiss")["ok"])
+        self.assertFalse(self.press("reset", user="tech1", password="pw")["ok"])      # not locked out
+        self.tick(5)
         self.cab.set_door_open(False)
+        self.assertEqual(self.state(), sm.AUTHORIZED)                      # back, still logged in
+        self.assertEqual(self.cab.auth.getCurrentUser(), "pharmacist1")
+        self.assertTrue(self.cab.door.isLocked())
+        self.assertFalse(self.cab.alarm_hw.isSounding())                   # the condition has ended
+        self.assertEqual(self.comm.of("ALARM_CLEARED")[0]["alarm"], "DOOR_OPEN_TOO_LONG")
+        self.assertIn("not completed", self.cab.display.read()["message"])
+        self.assertIsNone(self.cab.display.read()["blocking"])
+        self.assertEqual(self.cab.inventory.getOrderStatus("ORD-1"), "Pending")
+        self.assertTrue(self.press("logout")["ok"])
+
+    def test_tamper_in_invalid_needs_reset(self):
+        self.open_door_too_long()
+        self.cab.set_tamper(True)
+        self.assertEqual(self.state(), sm.LOCKED_OUT)
+        self.cab.set_door_open(False)
+        self.assertEqual(self.state(), sm.LOCKED_OUT)                      # closing is not enough
+        self.assertTrue(self.cab.alarm_hw.isSounding())
+        self.cab.set_tamper(False)
         self.assertFalse(self.press("disarm", user="nurse1", password="pw")["ok"])    # FR-SEC-07
         self.assertTrue(self.press("reset", user="tech1", password="pw")["ok"])
         self.assertEqual(self.state(), sm.IDLE)
         self.tick(20)
-        self.assertTrue(self.press("disarm", user="admin1", password="pw", notes="door propped open")["ok"])
+        self.assertTrue(self.press("disarm", user="admin1", password="pw", notes="door forced")["ok"])
         self.assertFalse(self.cab.alarm_hw.isSounding())
-        self.assertEqual(self.comm.of("ALARM_CLEARED")[0]["alarm"], "DOOR_OPEN_TOO_LONG")
-        disarm = self.cab.logger.getEvents(filter="ALARM_DISARMED")[0]
-        self.assertEqual(disarm["user"], "admin1")
-        self.assertEqual(disarm["details"]["notes"], "door propped open")
-        self.assertAlmostEqual(disarm["details"]["time_to_disarm_s"], 20.0, delta=0.5)
+        disarm = self.cab.logger.getEvents(filter="ALARM_DISARMED")
+        self.assertEqual({d["details"]["reason"] for d in disarm}, {"DOOR_OPEN_TOO_LONG", "CABINET_DAMAGE"})
+        self.assertEqual(disarm[0]["user"], "admin1")
+        self.assertEqual(disarm[0]["details"]["notes"], "door forced")
+        self.assertAlmostEqual(disarm[0]["details"]["time_to_disarm_s"], 20.0, delta=0.5)
 
     def test_lockout_on_fifth_failure_and_reset(self):
         for i in range(1, 5):

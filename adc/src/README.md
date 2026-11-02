@@ -57,7 +57,7 @@ The older command-line cabinet simulator that the monitor tests use is in `monit
 | FR-SEC-02 | Auth, State Machine Manager | `AuthManager.authenticate` / `lockOut`, `StateMachine` (`LOCKED_OUT`) |
 | FR-SEC-04/07 | Auth & Access Control | `AuthManager.verifyService` (`SERVICE_ROLES`), `clearLockedOut` |
 | FR-SEC-05/08/09/10, NFR-SEC-02/04 | State Machine Manager | `StateMachine._timed_event` (5 min session, 10 s relock, 60 s door limit), `_on_door`, `_enter` |
-| FR-SEC-06 | Alarm Policy | `AlarmPolicy._on_door`, `reportCondition`, `acknowledgeAlarm` |
+| FR-SEC-06 | Alarm Policy | `AlarmPolicy._on_door`, `reportCondition`, `clearCondition`, `acknowledgeAlarm` |
 | FR-IVT-01 to 05 | Inventory Manager | `InventoryManager.checkDeposit`, `confirmQuantity`, `recordDeposit`, `recordDispense` |
 | FR-HMS-01/05 | Event Logger | `EventLogger.logEvent`, `flushLog` (`LOG_BATCH`) |
 | FR-HMS-02, NFR-HMS-01 | Comm, Inventory | `HmsComm` (`ORDER_LIST` + ACK), `InventoryManager.reconcile` |
@@ -69,15 +69,16 @@ The older command-line cabinet simulator that the monitor tests use is in `monit
 ## Design decisions made while coding
 
 - **Deposit mode.** The Dispense mode only allows doctors and nurses (FR-DSP-01 invariant), so stocking uses a mirrored `Deposit` mode with the same door rules.
-- **Extra transitions.** The state machine adds logout and cancel (back to Idle or Authorized). It also lets a door closed before the medication was handled return to Dispense or Deposit, and an administrator or technician can reset the cabinet out of Invalid.
+- **Extra transitions.** The state machine adds logout and cancel (back to Idle or Authorized). It also lets a door closed before the medication was handled return to Dispense or Deposit, and closing the door leaves Invalid for Authorized.
 - **Staying logged in.** Where the PDF table goes back to Idle after a transaction (door closed and log sent, or the 10 s relock), the cabinet goes back to Authorized. The door locks, but the user stays logged in, because the PDF tracks the session separately (c_sessionState) and ends it only after 5 minutes of inactivity (FR-SEC-09). Every button press or door movement restarts that 5 minute timer.
-- **Invalid order ID.** An order ID that is not stocked is refused (FR-DSP-01): the screen says so and the user stays logged in to try again. There is no alarm, because a mistyped ID is not a safety problem. The Invalid state is kept for a door left open more than 60 s, which needs an administrator or technician reset.
+- **Invalid order ID.** An order ID that is not stocked is refused (FR-DSP-01): the screen says so and the user stays logged in to try again. There is no alarm, because a mistyped ID is not a safety problem. The Invalid state is kept for a door left open more than 60 s.
+- **Leaving Invalid.** Invalid lasts only while the door is still open. Closing the door returns to Authorized with the user still logged in, the door locked and the door alarm silenced. A transaction whose medication was not handled is abandoned and the order is unchanged. If the tamper switch trips while in Invalid, the cabinet goes to Locked Out instead, which only an administrator or technician reset leaves.
 - **Hardware faults.** Pressing "Open door" while the latch is engaged does nothing to the cabinet: the door stays shut and the screen says what to do first (log in, choose an order, or wait for a reset). Forced entry and damage are simulated only by the tamper switch, which sounds the alarm and locks the cabinet out (FR-SEC-06, FR-SEC-08).
-- **Alarm silencing.** Every alarm keeps sounding until an administrator or technician disarms it. Resetting a lockout does not silence the alarm.
+- **Alarm silencing.** The door-open alarm stops when the door is closed, because its condition (FR-SEC-05, "remains open") has ended. The tamper alarm keeps sounding until an administrator or technician disarms it. Resetting a lockout does not silence the alarm.
 - **HMS unreachable.** If the HMS cannot be reached, the login is refused and the cabinet stays locked. This does not count as a failed attempt.
 - **Who checks passwords.** The HMS checks them (`AUTH_REQUEST` / `AUTH_RESULT`), and the cabinet never stores them. Passwords cross the LAN in plain TCP, the same trust level as the rest of the link.
 - **Offline messages.** While the HMS is offline, outgoing messages wait in a persisted outbox. Each keeps its original time in `body.at` and is sent with a fresh frame time after reconnecting.
 
 ## Tests
 
-`py -m unittest discover -s adc/tests` (20 tests, about 2 s). See `adc/tests/README.md`.
+`py -m unittest discover -s adc/tests` (21 tests, about 2 s). See `adc/tests/README.md`.
