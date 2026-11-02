@@ -68,7 +68,7 @@ class AccessControl:
         self._host = host
         self._lock = threading.RLock()
         self._sessions = {}
-        self._fails = {}
+        self._fails = {}                # device -> (user name, consecutive failures for that name)
         self._locked_until = {}
         self._users = state.load("users")
         self._perms = state.load("perms") or {r: list(p) for r, p in DEFAULT_PERMS.items()}
@@ -91,19 +91,21 @@ class AccessControl:
                     self._log.append({"user": user, "type": "LOGIN_BLOCKED", "data": "device " + device})
                     raise DeviceLocked(device)
                 del self._locked_until[device]
-                self._fails[device] = 0
+                self._fails.pop(device, None)
             rec = self._users.get(user)
             salt = bytes.fromhex(rec["salt"]) if rec else b"\0" * 16
             good = hmac.compare_digest(_hash(password, salt).hex(), rec["hash"] if rec else "x")
             if not rec or not good:
-                self._fails[device] = self._fails.get(device, 0) + 1
+                last, count = self._fails.get(device, (None, 0))
+                count = count + 1 if last == user else 1
+                self._fails[device] = (user, count)
                 self._log.append({"user": user, "type": "LOGIN_FAILED",
-                                  "data": "device %s, failure %d" % (device, self._fails[device])})
-                if self._fails[device] >= LOCKOUT_AFTER:
+                                  "data": "device %s, failure %d" % (device, count)})
+                if count >= LOCKOUT_AFTER:
                     self._locked_until[device] = now + LOCKOUT_SECONDS
                     self._log.append({"user": user, "type": "DEVICE_LOCKED", "data": device})
                 raise BadCredentials(user)
-            self._fails[device] = 0
+            self._fails.pop(device, None)
             session = Session(user, rec["role"], device, now)
             self._sessions[session.id] = session
             self._log.append({"user": user, "type": "LOGIN", "data": "role " + rec["role"]})
