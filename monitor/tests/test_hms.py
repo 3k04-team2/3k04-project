@@ -150,6 +150,18 @@ class SystemTests(unittest.TestCase):
         self.assertFalse(self.host.tone_is_on())
         self.assertIsNotNone(oid)
 
+    def test_alarm_disarmed_at_adc_needs_nothing_at_hms(self):
+        doc = self.login("doctor1")
+        self.adc.command(["alarm", "CABINET_DAMAGE", "critical"])
+        self.assertTrue(wait_for(lambda: any(a["type"] == "CABINET_DAMAGE" for a in self.sys.alarms.active())))
+        with self.assertRaises(OrderError):
+            self.sys.orders.submit(doc, "ADC-1", "Insulin", 1, True)
+        self.adc.command(["clear", "CABINET_DAMAGE"])
+        self.assertTrue(wait_for(lambda: not self.sys.alarms.active()))
+        self.assertFalse(self.sys.health.maintenance("ADC-1"))
+        self.assertFalse(self.host.tone_is_on())
+        self.assertIsNotNone(self.sys.orders.submit(doc, "ADC-1", "Insulin", 1, True))
+
     def test_adc_login_checked_by_hms(self):
         results = []
         plain = self.adc._handle
