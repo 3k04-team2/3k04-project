@@ -91,6 +91,20 @@ class SystemTests(unittest.TestCase):
         self.host.advance(3601)
         self.assertEqual(self.sys.access.login("doctor1", demo_password("doctor1"), "dev-x").user, "doctor1")
 
+    def test_only_consecutive_failures_of_one_user_lock(self):
+        for user in ("doctor200", "doctor2", "doctor2", "doctor2", "doctor2", "nurse1"):
+            with self.assertRaises(BadCredentials):
+                self.sys.access.login(user, "wrong", "dev-y")
+        self.assertEqual(self.sys.access.login("doctor1", demo_password("doctor1"), "dev-y").user, "doctor1")
+        for _ in range(4):
+            with self.assertRaises(BadCredentials):
+                self.sys.access.login("nurse1", "wrong", "dev-y")
+        self.login("nurse1")                                        # a different device
+        with self.assertRaises(BadCredentials):
+            self.sys.access.login("nurse1", "wrong", "dev-y")
+        with self.assertRaises(DeviceLocked):
+            self.sys.access.login("doctor1", demo_password("doctor1"), "dev-y")
+
     def test_permissions(self):
         nurse = self.login("nurse1")
         self.assertFalse(self.sys.access.allowed(nurse, "submit_order"))

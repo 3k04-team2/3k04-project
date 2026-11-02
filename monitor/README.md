@@ -12,7 +12,7 @@ Python 3.10 or newer, standard library only. On Windows the command is `py`.
 
 Options: `--port` (cabinet port, default 9000), `--ui-port` (default 8080), `--data` (folder for saved state and log), `--lan`.
 
-Demo accounts are doctor1, nurse1, pharmacist1, tech1, admin1 and it1 (roles and passwords are defined in `monitor/src/hms/access/access_control.py`). Five wrong passwords from one device lock it for one hour. A session ends after 600 s without activity.
+Demo accounts are doctor1, nurse1, pharmacist1, tech1, admin1 and it1 (roles and passwords are defined in `monitor/src/hms/access/access_control.py`). Five consecutive wrong passwords for the same user name from one device lock that device for one hour (a failure for a different user name starts the count again). A session ends after 600 s without activity.
 
 ## Where each module is (`monitor/src/hms/`)
 
