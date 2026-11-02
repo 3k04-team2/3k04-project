@@ -3,8 +3,8 @@
 Secret: the door solenoid, the door contact switch (i_doorSensor), the latch
 sensor (i_lockSensor) and the enclosure tamper switch (i_tamperSensor).
 Sensor changes are pushed to registered handlers (interrupts, not polling) as
-"opened", "closed", "forced" (opened while the latch was engaged, NAT-01) or
-"tamper".
+"opened", "closed" or "tamper". A latched door does not open (NAT-01); forcing
+it open or damaging the cabinet trips the tamper switch.
 
 setOpen and setTamper stand in for the physical world; the web panel calls them.
 """
@@ -39,7 +39,7 @@ class Door:
         return self._tamper
 
     def registerDoorSensorHandler(self, callback):
-        """callback(event) with event "opened", "closed", "forced" or "tamper"."""
+        """callback(event) with event "opened", "closed" or "tamper"."""
         self._handlers.append(callback)
 
     def clearHandlers(self):
@@ -48,12 +48,15 @@ class Door:
 
     # ---- the physical world -----------------------------------------------------
     def setOpen(self, is_open):
+        """Returns False if the door stayed shut because the latch is engaged."""
         with self._lock:
             if is_open == self._open:
-                return
+                return True
+            if is_open and self._locked:
+                return False
             self._open = is_open
-            forced = is_open and self._locked
-        self._notify("forced" if forced else "opened" if is_open else "closed")
+        self._notify("opened" if is_open else "closed")
+        return True
 
     def setTamper(self, on):
         with self._lock:

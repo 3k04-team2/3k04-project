@@ -289,6 +289,17 @@ class DispensingManager:
             self._comm.sendMessage("ORDER_STATUS", {"orders": [{"order": tx["order"], "status": "Fulfilled"}]})
             return {"event": "retrieved", "order": tx["order"]}
 
+    def explainLockedDoor(self):
+        """Someone pulled the handle while the latch was engaged: say what to do first."""
+        with self._lock:
+            st = self._machine.getState()
+            if st in (sm.LOCKED_OUT, sm.INVALID):
+                return _fail(self._display.showMessage("DOOR_LOCKED_RESET"))
+            if st == sm.IDLE:
+                return _fail(self._display.showMessage("DOOR_LOCKED_LOGIN"))
+            self._auth.refreshSession()
+            return _fail(self._display.showMessage("DOOR_LOCKED_SELECT"))
+
     def handleTimeout(self, timer=None):
         """Called every 50 ms: the State Machine checks its timed transitions."""
         with self._lock:
@@ -323,8 +334,8 @@ class DispensingManager:
 
     # ---- door sensor (interrupts) ----------------------------------------------------------
     def _on_door(self, event):
-        """Opening and closing during a transaction; forced entry and tamper go to the
-        Alarm Policy and the State Machine."""
+        """Opening and closing during a transaction; tamper goes to the Alarm Policy
+        and the State Machine."""
         with self._lock:
             self._auth.refreshSession()
             st, tx = self._machine.getState(), self._tx
