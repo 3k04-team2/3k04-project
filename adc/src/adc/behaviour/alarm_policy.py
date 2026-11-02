@@ -6,8 +6,9 @@ the alarm here. The State Machine reports the door left open too long (FR-SEC-05
 Every alarm and disarm is written to the Event Logger with its reason, time to
 disarm and optional notes (FR-HMS-05) and sent to the HMS.
 
-An alarm stays sounding until it is disarmed; who may disarm is decided by
-Authentication & Access Control (FR-SEC-07).
+The door-open alarm stops by itself once the door is closed (the condition is
+no longer true). The tamper alarm stays sounding until it is disarmed; who may
+disarm is decided by Authentication & Access Control (FR-SEC-07).
 """
 
 import threading
@@ -65,6 +66,21 @@ class AlarmPolicy:
         if cleared:
             self._logger.flushLog()
         return [a["reason"] for a in cleared]
+
+    def clearCondition(self, reason):
+        """The condition behind one alarm has ended; returns True if that alarm was sounding."""
+        with self._lock:
+            a = self._active.pop(reason, None)
+            if a is None:
+                return False
+            if not self._active:
+                self._hw.alarmOff()
+        took = self._timer.endTiming(a["timing"]) or 0.0
+        self._logger.logEvent("ALARM_CLEARED", details={"reason": reason, "raised_at": a["time"],
+                                                        "duration_s": round(took, 1)})
+        self._comm.sendMessage("ALARM_CLEARED", {"alarm": reason})
+        self._logger.flushLog()
+        return True
 
     def resetAlarms(self):
         """Forget every alarm without logging (the controller is losing power)."""

@@ -8,7 +8,10 @@ Implements:
 - FR-SEC-02: the cabinet stays locked in every mode except Dispense, Deposit
   and Door Open ("REQ for cabinet lock"); a failed login changes nothing.
 - FR-SEC-05: Door Open for more than 60 s -> Invalid, and the alarm sounds.
-- FR-SEC-08: the tamper switch (cabinet forced open or damaged) -> Locked Out.
+  Closing the door ends the condition: Invalid -> Authorized and the door
+  alarm goes silent. The user stays logged in throughout.
+- FR-SEC-08: the tamper switch (cabinet forced open or damaged) -> Locked Out,
+  from any mode including Invalid; only an administrator/technician reset leaves it.
 - FR-SEC-09: Authorized with no activity for 5 minutes -> Idle (session ended).
 - FR-SEC-10: Dispense/Deposit with the door still closed 10 s after unlocking
   -> the door locks again.
@@ -20,7 +23,7 @@ Additions to the PDF table, needed for a complete machine:
 - Authorized -> Idle on logout; Dispense/Deposit -> Authorized on cancel.
 - Door Open -> Dispense/Deposit if the door closes before the medication was
   taken out or placed in (the transaction is not finished).
-- Invalid -> Idle on an administrator/technician reset.
+- Invalid -> Authorized when the door is closed again.
 - Where the PDF table returns to Idle after a transaction (relock, log sent),
   this machine returns to Authorized: c_sessionState only ends on inactivity
   (FR-SEC-09) or logout, so the user stays logged in; the door still locks.
@@ -38,7 +41,7 @@ INVALID = "Invalid"
 LOCKED_OUT = "Locked Out"
 STATES = (IDLE, AUTHORIZED, DISPENSE, DEPOSIT, DOOR_OPEN, DOOR_CLOSED, INVALID, LOCKED_OUT)
 UNLOCKED_STATES = (DISPENSE, DEPOSIT, DOOR_OPEN)
-NO_SESSION_STATES = (IDLE, LOCKED_OUT, INVALID)
+NO_SESSION_STATES = (IDLE, LOCKED_OUT)
 
 RELOCK_AFTER = 10.0
 DOOR_OPEN_LIMIT = 60.0
@@ -61,8 +64,8 @@ TRANSITIONS = {
     (DOOR_OPEN, "RETURN_TO_DEPOSIT"): DEPOSIT,
     (DOOR_OPEN, "DOOR_OPEN_TIMEOUT"): INVALID,
     (DOOR_CLOSED, "LOG_SENT"): AUTHORIZED,
+    (INVALID, "DOOR_CLOSED"): AUTHORIZED,
     (LOCKED_OUT, "RESET"): IDLE,
-    (INVALID, "RESET"): IDLE,
 }
 
 # events that apply in any mode (FR-SEC-08)
@@ -173,6 +176,9 @@ class StateMachine:
             self._alarms.reportCondition({"condition": "DOOR_OPEN_TOO_LONG"})
             self._logger.logEvent("INVALID_STATE", details={"reason": "door open more than 60 s"})
             self._display.showBlockingMessage("INVALID_STATE", reason="door open more than 60 s")
+        elif old == INVALID and event == "DOOR_CLOSED":
+            self._alarms.clearCondition("DOOR_OPEN_TOO_LONG")
+            self._logger.logEvent("INVALID_CLEARED", user=user, details={"reason": "door closed"})
         if new == AUTHORIZED:
             self._auth.refreshSession()
         elif new in NO_SESSION_STATES:

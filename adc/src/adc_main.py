@@ -5,8 +5,8 @@ Run (from the repo root, with the HMS already running):
     py adc/src/adc_main.py --id ADC-2 --ui-port 8091
 Open http://127.0.0.1:8090 (see adc/src/README.md).
 
-This file is not called main.py because the monitor's tests put adc/src on the
-import path and import the monitor's main.py.
+This file is not called main.py because the ADC tests put both adc/src and
+monitor/src on the import path and import the monitor's main.py.
 """
 
 import argparse

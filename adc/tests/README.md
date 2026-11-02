@@ -1,13 +1,14 @@
 # ADC tests
 
-From the repo root: `py -m unittest discover -s adc/tests` (20 tests, about 2 s).
+From the repo root: `py -m unittest discover -s adc/tests` (21 tests, about 2 s).
 
 `test_adc.py` has three groups:
 
 - `CabinetTests` run the whole cabinet with a simulated clock and a fake HMS link, so timing rules are checked without waiting:
   - deposit then dispense
   - roles (pharmacists cannot dispense, nurses cannot deposit)
-  - the 10 s relock and the 60 s door limit (Invalid, alarm, reset, disarm with notes and time to disarm)
+  - the 10 s relock and the 60 s door limit (Invalid with an alarm; closing the door returns to Authorized and silences it)
+  - the tamper switch tripping in Invalid (Locked Out, reset, disarm with notes and time to disarm)
   - the warning on the 3rd failed login and lockout on the 5th, and the reset
   - a latched door staying shut with a "log in first" message and no alarm, and the tamper switch locking the cabinet out with an alarm
   - the three deposit blocks, the full cabinet, and the Inventory Manager refusing a deposit whose quantity was not confirmed

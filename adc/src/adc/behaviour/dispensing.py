@@ -100,6 +100,8 @@ class DispensingManager:
     def _in_logout(self, d):
         with self._lock:
             st = self._machine.getState()
+            if st == sm.INVALID:
+                return _fail("Close the door first.")
             if st in (sm.DISPENSE, sm.DEPOSIT):
                 self.cancelDispense()
                 st = self._machine.getState()
@@ -197,15 +199,18 @@ class DispensingManager:
 
     def _in_dismiss(self, d):
         with self._lock:
-            if self._machine.getState() in (sm.LOCKED_OUT, sm.INVALID):
+            st = self._machine.getState()
+            if st == sm.LOCKED_OUT:
                 return _fail("An administrator or technician must reset the cabinet.")
+            if st == sm.INVALID:
+                return _fail("Close the door to leave the Invalid state.")
             self._display.clearBlockingMessage()
             return _ok()
 
     def _in_reset(self, d):
-        """FR-SEC-04: leaving Locked Out (or Invalid) needs an administrator or technician."""
+        """FR-SEC-04: leaving Locked Out needs an administrator or technician."""
         with self._lock:
-            if self._machine.getState() not in (sm.LOCKED_OUT, sm.INVALID):
+            if self._machine.getState() != sm.LOCKED_OUT:
                 return _fail("The cabinet is not locked out.")
             if not self._door.isDoorClosed():
                 return _fail("Close the door before resetting.")
@@ -216,7 +221,7 @@ class DispensingManager:
         with self._lock:
             if not res.ok:
                 return self._service_refused(res, "can reset")
-            if self._machine.getState() not in (sm.LOCKED_OUT, sm.INVALID):
+            if self._machine.getState() != sm.LOCKED_OUT:
                 return _fail("The cabinet is not locked out.")
             self._auth.clearLockedOut(user)
             self._machine.handleEvent("RESET")
@@ -293,7 +298,7 @@ class DispensingManager:
         """Someone pulled the handle while the latch was engaged: say what to do first."""
         with self._lock:
             st = self._machine.getState()
-            if st in (sm.LOCKED_OUT, sm.INVALID):
+            if st == sm.LOCKED_OUT:
                 return _fail(self._display.showMessage("DOOR_LOCKED_RESET"))
             if st == sm.IDLE:
                 return _fail(self._display.showMessage("DOOR_LOCKED_LOGIN"))
@@ -354,6 +359,13 @@ class DispensingManager:
                 else:
                     self._machine.handleEvent("RETURN_TO_DISPENSE" if tx["mode"] == "withdraw" else "RETURN_TO_DEPOSIT")
                     self._display.showMessage("DOOR_UNLOCKED")
+            elif event == "closed" and st == sm.INVALID:
+                self._machine.handleEvent("DOOR_CLOSED")
+                if tx["done"]:
+                    key = "DISPENSE_COMPLETE" if tx["mode"] == "withdraw" else "DEPOSIT_COMPLETE"
+                    self._display.showMessage(key, 10, order=tx["order"], compartment=tx["compartment"])
+                else:
+                    self._display.showMessage("INVALID_CLEARED", 10, order=tx["order"])
 
     def _on_state(self, old, new, event):
         """A finished, cancelled or interrupted transaction is closed."""
