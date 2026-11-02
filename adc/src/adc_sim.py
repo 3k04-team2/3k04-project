@@ -9,6 +9,7 @@ Type commands into this window (optionally start with an ADC name, e.g. "ADC-2 s
   deposit ORD-1      the pharmacist stocks that order into its compartment
   withdraw ORD-1     the doctor takes it out (order becomes Fulfilled)
   count              report a wrong inventory once (the HMS raises a mismatch alarm)
+  login USER PASS    a user logs in at the cabinet (the HMS answers granted or denied, with the role)
   noack / ack        stop or start acknowledging the HMS's messages
   drop               close the connection (the ADC reconnects after one second)
   status             print what this ADC holds
@@ -41,6 +42,8 @@ class Adc:
         self.orders = {}                  # order id -> {compartment, medication, quantity}
         self.contents = {}                # compartment -> {medication, quantity}
         self.alive = True
+        self.auth_results = []            # (user, result, role, seconds from request to answer)
+        self._auth_sent = {}              # request sequence number -> time sent
 
     def say(self, text):
         print("[%s] %s" % (self.id, text), flush=True)
@@ -54,11 +57,13 @@ class Adc:
             data = CODEC.encode(Message(type_, self.id, self.seq, time.time(), body))
             if corrupt:
                 data = data.replace(b'"crc":', b'"crc":1')
+            if type_ == "AUTH_REQUEST":
+                self._auth_sent[self.seq] = time.time()
             try:
                 self.sock.sendall(data + b"\n")
-                return True
+                return self.seq           # true when sent: sequence numbers start at 1
             except OSError:
-                return False
+                return 0
 
     def send_inventory(self):
         comps = [{"compartment": k, "medication": c["medication"], "quantity": c["quantity"]}
@@ -116,6 +121,14 @@ class Adc:
                                                   for k, o in self.orders.items()) or "empty"))
         elif msg.type == "ROLE_UPDATE":
             self.say("role update: %d users" % len(msg.body.get("users", [])))
+        elif msg.type == "AUTH_RESULT":
+            b = msg.body
+            sent = self._auth_sent.pop(b.get("request"), None)
+            took = time.time() - sent if sent is not None else None
+            self.auth_results.append((b.get("user"), b.get("result"), b.get("role"), took))
+            self.say("login %s: %s %s%s" % (b.get("user"), b.get("result"), b.get("role") or "",
+                                            " (%.0f ms)" % (took * 1000) if took is not None else ""))
+            return                        # login answers are not acknowledged
         elif msg.type == "ACK":
             return
         elif msg.type == "NAK":
@@ -154,6 +167,8 @@ class Adc:
         elif cmd == "count":
             self.wrong_count = True
             self.send_inventory()
+        elif cmd == "login":
+            self.login(args[0] if args else "", args[1] if len(args) > 1 else "")
         elif cmd == "noack":
             self.acking = False
         elif cmd == "ack":
@@ -167,6 +182,9 @@ class Adc:
                      (self.heartbeat, self.acking, sorted(self.orders), self.contents))
         else:
             self.say("unknown command " + cmd)
+
+    def login(self, user, password):
+        return self.send("AUTH_REQUEST", {"user": user, "password": password})
 
     def _move(self, kind, order_id):
         o = self.orders.get(order_id)

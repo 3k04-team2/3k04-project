@@ -84,6 +84,40 @@ class ReviewFixSystemTests(unittest.TestCase):
         self.assertTrue(any(e["type"] == "REPORT" for e in self.sys.log.query({"type": "REPORT"})))
 
 
+class AdcLoginTests(unittest.TestCase):
+    # Part A checks every login at the cabinet through the HMS (AUTH_REQUEST -> AUTH_RESULT)
+    setUp = base.SystemTests.setUp
+    tearDown = base.SystemTests.tearDown
+
+    def ask(self, user, password):
+        n = len(self.adc.auth_results)
+        self.assertTrue(self.adc.login(user, password))
+        self.assertTrue(wait_for(lambda: len(self.adc.auth_results) > n))
+        return self.adc.auth_results[-1]
+
+    def test_right_password_is_granted_with_role(self):
+        from hms.access import demo_password
+        user, result, role, took = self.ask("nurse1", demo_password("nurse1"))
+        self.assertEqual((user, result, role), ("nurse1", "granted", "Nurse"))
+        self.assertLess(took, 0.1)          # HMS share of Part A's 500 ms login budget
+
+    def test_wrong_password_and_unknown_user_are_denied(self):
+        self.assertEqual(self.ask("nurse1", "wrong")[1:3], ("denied", ""))
+        self.assertEqual(self.ask("nobody", "x")[1:3], ("denied", ""))
+
+    def test_hms_leaves_the_lockout_to_the_adc(self):
+        from hms.access import demo_password
+        for _ in range(6):
+            self.assertEqual(self.ask("doctor1", "wrong")[1], "denied")
+        self.assertEqual(self.ask("doctor1", demo_password("doctor1"))[1], "granted")
+
+    def test_password_is_never_logged(self):
+        self.ask("nurse1", "SecretTyped123")
+        text = repr(self.sys.log.query({}))
+        self.assertNotIn("SecretTyped123", text)
+        self.assertIn("ADC_LOGIN_FAILED", text)
+
+
 class HelloTimeTests(unittest.TestCase):
     def test_hello_with_a_wrong_clock_is_refused(self):
         from hms.gateway import adc_gateway as G

@@ -12,7 +12,7 @@ from hms.protocol import (Message, ChecksumError, FormatError, UnsupportedRevisi
 from hms.link import NotConnected
 
 TYPES = {"HELLO", "HEARTBEAT", "ORDER_STATUS", "EVENT", "INVENTORY",
-         "ALARM", "ALARM_CLEARED", "LOG_BATCH", "ACK", "NAK"}
+         "ALARM", "ALARM_CLEARED", "LOG_BATCH", "AUTH_REQUEST", "ACK", "NAK"}
 MAX_TEXT = 256
 MAX_QUANTITY = 1000
 MAX_SKEW = 60.0
@@ -99,6 +99,28 @@ class AdcGateway:
                     raise AdcUnavailable(adcId)
                 next_try = now + self._retry
             _time.sleep(0.01)
+
+    def answer(self, adcId, msg):
+        """Send once and do not wait for an ACK; returns the sequence number.
+
+        Used for AUTH_RESULT. A login answer is only useful at once (the ADC must
+        decide within 0.5 s), so a lost answer is never resent: the ADC times out
+        and refuses the login. Exceptions: AdcUnavailable, BoundsError.
+        """
+        st = self._adcs.get(adcId)
+        if st is None or st.conn is None:
+            raise AdcUnavailable(adcId)
+        self._check_bounds(st, msg.body)
+        with self._lock:
+            st.out_seq += 1
+            seq = st.out_seq
+        msg.adc, msg.seq, msg.time = adcId, seq, self._host.now()
+        try:
+            self._link.send(st.conn, self._codec.encode(msg))
+        except NotConnected:
+            st.conn = None
+            raise AdcUnavailable(adcId)
+        return seq
 
     def broadcast(self, msg):
         """Send to every registered ADC; returns {adcId: 'synced' or 'not confirmed'}."""

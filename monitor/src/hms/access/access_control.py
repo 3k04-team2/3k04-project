@@ -109,6 +109,22 @@ class AccessControl:
             self._log.append({"user": user, "type": "LOGIN", "data": "role " + rec["role"]})
             return session
 
+    def checkAdcLogin(self, adc, user, password):
+        """A login typed at an ADC (AUTH_REQUEST): returns (granted, role).
+
+        No HMS session is opened and no failure is counted here: the ADC owns its
+        own lockout (Part A FR-SEC-03, locked out on the 5th failure until an
+        administrator or technician resets it). The password is never logged.
+        """
+        rec = self._users.get(user)
+        salt = bytes.fromhex(rec["salt"]) if rec else b"\0" * 16
+        good = hmac.compare_digest(_hash(password, salt).hex(), rec["hash"] if rec else "x")
+        if rec and good:
+            self._log.append({"adc": adc, "user": user, "type": "ADC_LOGIN", "data": "role " + rec["role"]})
+            return True, rec["role"]
+        self._log.append({"adc": adc, "user": user, "type": "ADC_LOGIN_FAILED", "data": ""})
+        return False, ""
+
     def logout(self, session):
         with self._lock:
             self._sessions.pop(session.id, None)

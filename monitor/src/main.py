@@ -18,7 +18,7 @@ from hms.host import HostPlatform, SimulatedHost
 from hms.inventory import InventoryTracker
 from hms.link import AdcLink
 from hms.orders import OrderManager
-from hms.protocol import MessageCodec
+from hms.protocol import Message, MessageCodec
 from hms.store import LogStore, StateStore
 from hms.ui import WebApp
 from hms.ui.app import PAGE
@@ -98,7 +98,19 @@ class System:
         g.subscribe("EVENT", self.inventory.onEvent)
         g.subscribe("INVENTORY", self.inventory.onInventory)
         g.subscribe("ORDER_STATUS", self.orders.onOrderStatus)
+        g.subscribe("AUTH_REQUEST", self._on_auth_request)
         self.health.onStateChange(self.orders.onAdcStateChange)
+
+    def _on_auth_request(self, adc, msg):
+        # A login at the ADC (Part A checks every login through the HMS). The answer
+        # is sent once, without waiting for an ACK, so the reader thread never blocks.
+        b = msg.body
+        user = b.get("user") if isinstance(b.get("user"), str) else ""
+        password = b.get("password") if isinstance(b.get("password"), str) else ""
+        granted, role = self.access.checkAdcLogin(adc, user, password)
+        self.gateway.answer(adc, Message("AUTH_RESULT", body={
+            "request": msg.seq, "user": user,
+            "result": "granted" if granted else "denied", "role": role}))
 
     def _on_alarm(self, adc, msg):
         b = msg.body
