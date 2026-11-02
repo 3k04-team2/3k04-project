@@ -1,8 +1,12 @@
 """1.2.3 Event Logger.
 
 Secret: how activity is recorded and stored (a list in non-volatile storage)
-and how it is packed for the HMS (LOG_BATCH entries). Implements the local
-part of FR-HMS-01 and FR-HMS-05; flushLog hands unsent entries to the HMS link.
+and how it is packed for the HMS (LOG_BATCH entries).
+
+Implements FR-HMS-01 (withdrawals and deposits with time, user, order,
+medicine and quantity) and FR-HMS-05 (alarms with time, time to disarm, reason
+and notes): every entry is time-stamped here, and flushLog sends the unsent
+entries to the HMS.
 """
 
 import json
@@ -14,9 +18,10 @@ MAX_TEXT = 256
 
 
 class EventLogger:
-    def __init__(self, nvram, timer):
+    def __init__(self, nvram, timer, comm):
         self._nvram = nvram
         self._timer = timer
+        self._comm = comm
         self._lock = threading.RLock()
         self._events = nvram.read("activity_log", [])
         self._n = max([e["id"] for e in self._events], default=0)
@@ -50,15 +55,15 @@ class EventLogger:
                     if (startTime is None or e["time"] >= startTime)
                     and (endTime is None or e["time"] <= endTime) and keep(e)]
 
-    def flushLog(self, comm):
-        """Send every unsent entry to the HMS (sent now or queued by comm). Returns the count."""
+    def flushLog(self):
+        """Send every unsent entry to the HMS (sent now or queued by the HMS link). Returns the count."""
         with self._lock:
             unsent = [e for e in self._events if not e["sent"]]
             for i in range(0, len(unsent), BATCH):
                 chunk = unsent[i:i + BATCH]
                 entries = [{"user": e["user"], "type": e["type"], "time": e["time"],
                             "data": json.dumps(e["details"], sort_keys=True)[:MAX_TEXT]} for e in chunk]
-                comm.sendMessage("LOG_BATCH", {"entries": entries})
+                self._comm.sendMessage("LOG_BATCH", {"entries": entries})
                 for e in chunk:
                     e["sent"] = True
             if unsent:

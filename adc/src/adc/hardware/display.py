@@ -38,7 +38,6 @@ MESSAGES = {
     "INVALID_STATE": "INVALID STATE: {reason}. An administrator or technician must reset the cabinet.",
     "ALARM_DISARMED": "Alarm disarmed by {user}.",
     "RESET_DONE": "Cabinet reset by {user}.",
-    "NOT_NOW": "{text}",
 }
 
 
@@ -49,7 +48,6 @@ class Display:
         self._message = ""
         self._until = None
         self._blocking = None
-        self._blocking_id = None
 
     @staticmethod
     def _text(messageID, params):
@@ -67,26 +65,20 @@ class Display:
         text = self._text(messageID, params)
         with self._lock:
             self._blocking = text
-            self._blocking_id = messageID
         return text
 
     def clearBlockingMessage(self):
         with self._lock:
             self._blocking = None
-            self._blocking_id = None
 
     def clearDisplay(self):
         with self._lock:
             self._message = ""
             self._until = None
             self._blocking = None
-            self._blocking_id = None
 
     def isBlocked(self):
         return self._blocking is not None
-
-    def blockingID(self):
-        return self._blocking_id
 
     def read(self):
         with self._lock:

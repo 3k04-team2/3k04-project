@@ -7,7 +7,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))                  # the monitor code
-sys.path.insert(0, os.path.join(HERE, "..", "..", "adc", "src"))     # the cabinet simulator
+sys.path.insert(0, HERE)                                             # the cabinet simulator
 
 from hms.host import SimulatedHost                       # noqa: E402
 from hms.protocol import (MessageCodec, Message, ChecksumError, FormatError)  # noqa: E402

@@ -1,6 +1,6 @@
 """ADC simulator: pretends to be one or more Automated Dispensing Cabinets.
 
-Run:  py adc/src/adc_sim.py --count 2
+Run:  py monitor/tests/adc_sim.py --count 2
 Type commands into this window (optionally start with an ADC name, e.g. "ADC-2 stop"):
   stop / resume      stop or restart the heartbeats (the HMS marks the ADC Warning, then Offline)
   corrupt            send one frame with a wrong checksum (the HMS refuses it and logs it)
@@ -23,7 +23,7 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "monitor", "src"))   # for the message codec
+sys.path.insert(0, os.path.join(HERE, "..", "src"))   # for the message codec
 from hms.protocol import MessageCodec, Message  # noqa: E402
 
 CODEC = MessageCodec()

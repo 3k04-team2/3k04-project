@@ -10,7 +10,7 @@ From the repo root: `py -m unittest discover -s adc/tests` (19 tests, about 2 s)
   - the 10 s relock and the 60 s door limit (Invalid, alarm, reset, disarm with notes and time to disarm)
   - the warning on the 3rd failed login and lockout on the 5th, and the reset
   - forced entry and tamper
-  - the three deposit blocks and the full cabinet
+  - the three deposit blocks, the full cabinet, and the Inventory Manager refusing a deposit whose quantity was not confirmed
   - an invalid order ID being refused without locking the cabinet
   - inventory and lockout surviving a power cut
   - the 5 minute session timeout, and any interaction restarting it

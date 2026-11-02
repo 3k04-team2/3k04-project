@@ -1,4 +1,4 @@
 from . import state_machine
-from .alarm_policy import AlarmPolicy, NotAllowed, REASONS
+from .alarm_policy import AlarmPolicy
 from .dispensing import DispensingManager
-from .state_machine import StateMachine, TransitionResult
+from .state_machine import StateMachine

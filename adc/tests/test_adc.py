@@ -122,8 +122,11 @@ class CabinetTests(unittest.TestCase):
         self.assertEqual(self.cab.inventory.getCompartment("ORD-1"), 0)
         self.assertEqual(self.comm.of("ORDER_STATUS")[0]["orders"], [{"order": "ORD-1", "status": "Stocked"}])
         ev = self.comm.of("EVENT")[0]
-        self.assertEqual((ev["kind"], ev["user"], ev["order"], ev["medication"], ev["quantity"]),
-                         ("deposit", "pharmacist1", "ORD-1", "Insulin", 5))
+        self.assertEqual((ev["kind"], ev["order"], ev["medication"], ev["quantity"]), ("deposit", "ORD-1", "Insulin", 5))
+        rec = self.cab.logger.getEvents(filter="DEPOSIT")[0]                # FR-HMS-01
+        self.assertEqual((rec["user"], rec["details"]["order"], rec["details"]["medication"],
+                          rec["details"]["quantity"]), ("pharmacist1", "ORD-1", "Insulin", 5))
+        self.assertTrue(rec["time"])
         self.assertTrue(self.comm.of("LOG_BATCH"))
         self.assertTrue(self.press("logout")["ok"])
 
@@ -232,6 +235,8 @@ class CabinetTests(unittest.TestCase):
         self.assertEqual(self.press("confirm_quantity", matches=False)["blocked"], "quantity not confirmed")
         self.assertEqual(self.state(), sm.AUTHORIZED)
         self.assertEqual(self.cab.inventory.getOrderStatus("ORD-1"), "Pending")
+        with self.assertRaises(ValueError):                                       # FR-IVT-04 invariant
+            self.cab.inventory.recordDeposit("ORD-1", 0)
 
     def test_full_cabinet_blocks_deposit(self):
         self.cab.stop()
