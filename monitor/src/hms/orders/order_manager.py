@@ -135,7 +135,7 @@ class OrderManager:
         if self._health.maintenance(adcId):
             return AdcOffline("ADC %s is flagged for maintenance" % adcId)
         if any(a["adc"] == adcId for a in self._alarms.active()):
-            return AlarmBlocking("ADC %s has an unacknowledged alarm" % adcId)
+            return AlarmBlocking("ADC %s has an active alarm" % adcId)
         if self._inventory.free(adcId) < 1:
             return AdcFullError("ADC %s has no free compartment" % adcId)
         return None

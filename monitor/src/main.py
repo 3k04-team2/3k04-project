@@ -103,9 +103,9 @@ class System:
 
     def _on_alarm(self, adc, msg):
         b = msg.body
+        # The ADC sends ALARM_CLEARED once it is disarmed at the cabinet.
         self.alarms.raise_(b.get("alarm", "ADC_ALARM"), b.get("severity", "warning"), adc,
                            b.get("text", ""))
-        self.health.onAlarm(adc, msg)
 
     def _on_auth_request(self, adc, msg):
         # A login typed at the ADC: check it here and answer with AUTH_RESULT.

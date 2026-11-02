@@ -64,10 +64,6 @@ class HealthMonitor:
             if st is not None:
                 st.t_hb = self._host.monotonic()
 
-    def onAlarm(self, adcId, msg):
-        """A fault or alarm from the ADC also flags it for maintenance (SPEC-04)."""
-        self._flag(adcId, "alarm from the ADC: %s" % msg.body.get("alarm", ""))
-
     # ---- SPEC-01 and SPEC-11 -------------------------------------------------
     def tick(self, now):
         with self._lock:
