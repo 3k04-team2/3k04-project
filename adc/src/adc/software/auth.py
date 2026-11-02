@@ -3,7 +3,7 @@
 Secret: the session record, the inactivity timeout, the failed-attempt counter
 and the lockout rule. Passwords are checked by the HMS (through the HMS
 communication module); this module never stores them. The failure count and
-the lockout flag are kept in non-volatile storage so cutting the power does not
+the lockout flag are kept in memory so cutting the power does not
 undo a lockout.
 
 Implements FR-SEC-01/02/03 (who may log in, counting failures, the lockout on
@@ -35,13 +35,13 @@ class AuthResult:
 
 
 class AuthManager:
-    def __init__(self, comm, timer, nvram, logger):
+    def __init__(self, comm, timer, memory, logger):
         self._comm = comm
         self._timer = timer
-        self._nvram = nvram
+        self._memory = memory
         self._logger = logger
         self._lock = threading.RLock()
-        saved = nvram.read("auth", {})
+        saved = memory.read("auth", {})
         self._failures = saved.get("failures", 0)
         self._locked = saved.get("locked", False)
         self._user = None
@@ -143,4 +143,4 @@ class AuthManager:
             self._logger.logEvent("LOCKOUT_CLEARED", user=userId)
 
     def _save(self):
-        self._nvram.write("auth", {"failures": self._failures, "locked": self._locked})
+        self._memory.write("auth", {"failures": self._failures, "locked": self._locked})

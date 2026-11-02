@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "src"))                    # the cab
 
 from adc.behaviour import state_machine as sm                          # noqa: E402
 from adc.cabinet import Cabinet                                        # noqa: E402
-from adc.hardware import Nvram, SimulatedTimer                         # noqa: E402
+from adc.hardware import Memory, SimulatedTimer                         # noqa: E402
 from adc.software import HmsComm                                       # noqa: E402
 from adc.ui import Panel                                               # noqa: E402
 
@@ -84,7 +84,7 @@ class CabinetTests(unittest.TestCase):
 
     def make(self, capacity=4):
         cab = Cabinet("ADC-1", capacity=capacity, data_dir=self.tmp, timer=self.timer,
-                      comm_factory=lambda nvram: self.comm)
+                      comm_factory=lambda memory: self.comm)
         cab.power_on(run=False)
         return cab
 
@@ -339,11 +339,11 @@ class HmsCommTests(unittest.TestCase):
     def test_offline_messages_are_queued_and_kept(self):
         tmp = tempfile.mkdtemp()
         try:
-            nv = Nvram(tmp)
-            comm = HmsComm("ADC-1", "127.0.0.1", 1, 4, nv, log=lambda t: None)
+            memory = Memory(tmp)
+            comm = HmsComm("ADC-1", "127.0.0.1", 1, 4, memory, log=lambda t: None)
             self.assertEqual(comm.sendMessage("EVENT", {"kind": "deposit"}), "queued")
             self.assertEqual(comm.checkAuth("nurse1", "x"), ("unreachable", None))
-            again = HmsComm("ADC-1", "127.0.0.1", 1, 4, Nvram(tmp), log=lambda t: None)
+            again = HmsComm("ADC-1", "127.0.0.1", 1, 4, Memory(tmp), log=lambda t: None)
             self.assertEqual(again.getQueuedCount(), 1)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

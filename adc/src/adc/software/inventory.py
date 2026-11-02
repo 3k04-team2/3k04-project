@@ -1,7 +1,7 @@
 """1.2.2 Inventory Manager.
 
 Secret: how orders and their compartments are recorded (c_orderInventoryRecord,
-c_orderLocationRecord) and kept in non-volatile storage so they survive a power
+c_orderLocationRecord) and kept in memory so they survive a power
 loss, and the rules for what may be deposited.
 
 Implements FR-IVT-01 and FR-IVT-05 (every order and its compartment),
@@ -20,13 +20,13 @@ CAPACITY_WARNING = 0.95
 
 
 class InventoryManager:
-    def __init__(self, adc_id, nvram, capacity, comm):
+    def __init__(self, adc_id, memory, capacity, comm):
         self._id = adc_id
-        self._nvram = nvram
+        self._memory = memory
         self._capacity = capacity
         self._comm = comm
         self._lock = threading.RLock()
-        self._orders = nvram.read("inventory", {}).get("orders", {})
+        self._orders = memory.read("inventory", {}).get("orders", {})
         self._confirmed = set()         # orders whose quantity the pharmacist confirmed (FR-IVT-04)
 
     # ---- orders from the HMS ------------------------------------------------
@@ -189,4 +189,4 @@ class InventoryManager:
         finished = [oid for oid, o in self._orders.items() if o["status"] in ("Fulfilled", "Cancelled")]
         for oid in finished[:-KEEP_FINISHED] if len(finished) > KEEP_FINISHED else []:
             del self._orders[oid]
-        self._nvram.write("inventory", {"orders": self._orders})
+        self._memory.write("inventory", {"orders": self._orders})

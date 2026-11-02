@@ -26,7 +26,7 @@ def main():
     ap.add_argument("--port", type=int, default=9000, help="HMS port for cabinets")
     ap.add_argument("--capacity", type=int, default=16, help="number of compartments")
     ap.add_argument("--ui-port", type=int, default=8090, help="port of the cabinet panel")
-    ap.add_argument("--data", default=None, help="folder for non-volatile data (default adc/src/data/<id>)")
+    ap.add_argument("--data", default=None, help="folder for the cabinet's memory (default adc/src/data/<id>)")
     ap.add_argument("--lan", action="store_true", help="serve the panel on all network interfaces")
     a = ap.parse_args()
     data = a.data or os.path.join(HERE, "data", a.id)

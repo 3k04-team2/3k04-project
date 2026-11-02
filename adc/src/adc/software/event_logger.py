@@ -1,6 +1,6 @@
 """1.2.3 Event Logger.
 
-Secret: how activity is recorded and stored (a list in non-volatile storage)
+Secret: how activity is recorded and stored (a list in memory)
 and how it is packed for the HMS (LOG_BATCH entries).
 
 Implements FR-HMS-01 (withdrawals and deposits with time, user, order,
@@ -18,12 +18,12 @@ MAX_TEXT = 256
 
 
 class EventLogger:
-    def __init__(self, nvram, timer, comm):
-        self._nvram = nvram
+    def __init__(self, memory, timer, comm):
+        self._memory = memory
         self._timer = timer
         self._comm = comm
         self._lock = threading.RLock()
-        self._events = nvram.read("activity_log", [])
+        self._events = memory.read("activity_log", [])
         self._n = max([e["id"] for e in self._events], default=0)
 
     def logEvent(self, eventType, time=None, details=None, user=""):
@@ -71,4 +71,4 @@ class EventLogger:
             return len(unsent)
 
     def _save(self):
-        self._nvram.write("activity_log", self._events)
+        self._memory.write("activity_log", self._events)

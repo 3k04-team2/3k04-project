@@ -1,8 +1,8 @@
-"""Non-volatile storage (part of 1.1 Hardware Hiding).
+"""Memory (part of 1.1 Hardware Hiding).
 
 Secret: where data that must survive a power loss is kept (one JSON file per
-record in a folder now; NVRAM or flash on the real cabinet). A write is on
-disk before it returns (FR-HMS-06, NAT-05).
+record in a folder now; flash on the real cabinet). A write is on disk before
+it returns (FR-HMS-06, NAT-05).
 """
 
 import json
@@ -10,7 +10,7 @@ import os
 import threading
 
 
-class Nvram:
+class Memory:
     def __init__(self, folder):
         self._folder = folder
         self._lock = threading.Lock()
