@@ -75,8 +75,7 @@ class Panel:
             data = {k: v for k, v in q.items() if k != "kind"}
             return cab.press(str(q.get("kind", "")), **data)
         if path == "/api/door":
-            cab.set_door_open(bool(q.get("open")))
-            return {"ok": True}
+            return cab.set_door_open(bool(q.get("open")))
         if path == "/api/tamper":
             cab.set_tamper(bool(q.get("on")))
             return {"ok": True}

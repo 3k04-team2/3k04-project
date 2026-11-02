@@ -8,7 +8,7 @@ Implements:
 - FR-SEC-02: the cabinet stays locked in every mode except Dispense, Deposit
   and Door Open ("REQ for cabinet lock"); a failed login changes nothing.
 - FR-SEC-05: Door Open for more than 60 s -> Invalid, and the alarm sounds.
-- FR-SEC-08: the door sensor's "forced" or "tamper" event -> Locked Out.
+- FR-SEC-08: the tamper switch (cabinet forced open or damaged) -> Locked Out.
 - FR-SEC-09: Authorized with no activity for 5 minutes -> Idle (session ended).
 - FR-SEC-10: Dispense/Deposit with the door still closed 10 s after unlocking
   -> the door locks again.
@@ -66,9 +66,8 @@ TRANSITIONS = {
 }
 
 # events that apply in any mode (FR-SEC-08)
-FROM_ANY = {"FORCED_ENTRY": LOCKED_OUT, "CABINET_DAMAGE": LOCKED_OUT}
-DOOR_EVENTS = {"forced": ("FORCED_ENTRY", "cabinet forced open"),
-               "tamper": ("CABINET_DAMAGE", "tamper switch triggered")}
+FROM_ANY = {"CABINET_DAMAGE": LOCKED_OUT}
+DOOR_EVENTS = {"tamper": ("CABINET_DAMAGE", "cabinet forced open or damaged")}
 
 
 class TransitionResult:

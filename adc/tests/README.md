@@ -1,6 +1,6 @@
 # ADC tests
 
-From the repo root: `py -m unittest discover -s adc/tests` (19 tests, about 2 s).
+From the repo root: `py -m unittest discover -s adc/tests` (20 tests, about 2 s).
 
 `test_adc.py` has three groups:
 
@@ -9,7 +9,7 @@ From the repo root: `py -m unittest discover -s adc/tests` (19 tests, about 2 s)
   - roles (pharmacists cannot dispense, nurses cannot deposit)
   - the 10 s relock and the 60 s door limit (Invalid, alarm, reset, disarm with notes and time to disarm)
   - the warning on the 3rd failed login and lockout on the 5th, and the reset
-  - forced entry and tamper
+  - a latched door staying shut with a "log in first" message and no alarm, and the tamper switch locking the cabinet out with an alarm
   - the three deposit blocks, the full cabinet, and the Inventory Manager refusing a deposit whose quantity was not confirmed
   - an invalid order ID being refused without locking the cabinet
   - inventory and lockout surviving a power cut

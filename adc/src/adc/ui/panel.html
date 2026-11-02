@@ -103,7 +103,7 @@
     <table id="alarms"></table>
 
     <h3>Off-normal events (simulation)</h3>
-    <button class="red" onclick="post('/api/tamper', {on: true})">Tamper / damage</button>
+    <button class="red" onclick="post('/api/tamper', {on: true})">Force open / damage (tamper)</button>
     <button class="grey" onclick="post('/api/tamper', {on: false})">Repair tamper</button><br>
     <button class="red" onclick="post('/api/power', {on: false})">Cut power</button>
     <button class="green" onclick="post('/api/power', {on: true})">Restore power</button><br>

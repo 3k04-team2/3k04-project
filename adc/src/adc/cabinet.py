@@ -91,7 +91,11 @@ class Cabinet:
         return self.keyboard.press(kind, **data)
 
     def set_door_open(self, is_open):
-        self.door.setOpen(is_open)
+        if self.door.setOpen(is_open):
+            return {"ok": True}
+        if not self.powered:
+            return {"ok": False, "message": "The cabinet has no power; the door stays latched."}
+        return self.dispensing.explainLockedDoor()
 
     def set_tamper(self, on):
         self.door.setTamper(on)

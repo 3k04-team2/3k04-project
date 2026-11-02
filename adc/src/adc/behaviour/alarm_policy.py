@@ -1,8 +1,8 @@
 """1.3.3 Alarm Policy.
 
 Secret: which conditions sound the alarm ("REQ for alarm (c_alarmSound)").
-Implements FR-SEC-06: the door sensor's "forced" and "tamper" events sound the
-alarm here. The State Machine reports the door left open too long (FR-SEC-05).
+Implements FR-SEC-06: the tamper switch (cabinet forced open or damaged) sounds
+the alarm here. The State Machine reports the door left open too long (FR-SEC-05).
 Every alarm and disarm is written to the Event Logger with its reason, time to
 disarm and optional notes (FR-HMS-05) and sent to the HMS.
 
@@ -13,11 +13,10 @@ Authentication & Access Control (FR-SEC-07).
 import threading
 
 REASONS = {
-    "FORCED_ENTRY": "cabinet forced open",
-    "CABINET_DAMAGE": "cabinet damaged (tamper switch)",
+    "CABINET_DAMAGE": "cabinet forced open or damaged (tamper switch)",
     "DOOR_OPEN_TOO_LONG": "door open for more than 60 s",
 }
-DOOR_EVENTS = {"forced": "FORCED_ENTRY", "tamper": "CABINET_DAMAGE"}
+DOOR_EVENTS = {"tamper": "CABINET_DAMAGE"}
 MAX_NOTES = 200
 
 

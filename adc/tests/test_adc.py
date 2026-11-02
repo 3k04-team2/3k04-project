@@ -209,16 +209,23 @@ class CabinetTests(unittest.TestCase):
         self.assertEqual(self.state(), sm.IDLE)
         self.login("nurse1")
 
-    def test_forced_entry_and_tamper_lock_out_with_alarm(self):
-        self.cab.set_door_open(True)                                        # latched door forced open
+    def test_latched_door_stays_shut_without_alarm(self):
+        r = self.cab.set_door_open(True)
+        self.assertFalse(r["ok"])
+        self.assertIn("log in first", r["message"])
+        self.login("nurse1")
+        self.assertIn("Choose an order", self.cab.set_door_open(True)["message"])
+        self.assertTrue(self.cab.door.isDoorClosed())
+        self.assertEqual(self.state(), sm.AUTHORIZED)
+        self.assertFalse(self.cab.alarm_hw.isSounding())
+        self.assertEqual(self.comm.of("ALARM"), [])
+
+    def test_tamper_locks_out_with_alarm(self):
+        self.cab.set_tamper(True)                                           # cabinet forced open or damaged
         self.assertEqual(self.state(), sm.LOCKED_OUT)
         self.assertTrue(self.cab.alarm_hw.isSounding())
-        self.assertEqual(self.comm.of("ALARM")[0]["alarm"], "FORCED_ENTRY")
-        self.cab.set_door_open(False)
-        self.press("reset", user="tech1", password="pw")
-        self.cab.set_tamper(True)
-        self.assertEqual(self.state(), sm.LOCKED_OUT)
-        self.assertIn("CABINET_DAMAGE", [b["alarm"] for b in self.comm.of("ALARM")])
+        self.assertEqual(self.comm.of("ALARM")[0]["alarm"], "CABINET_DAMAGE")
+        self.assertIn("resets the cabinet", self.cab.set_door_open(True)["message"])
         self.assertFalse(self.press("reset", user="tech1", password="pw")["ok"])      # still tampered
         self.cab.set_tamper(False)
         self.assertTrue(self.press("reset", user="tech1", password="pw")["ok"])
