@@ -11,6 +11,10 @@ non-volatile storage, and syncQueue sends them after the next HELLO. Each
 message carries its original time in body["at"]; the frame gets a fresh
 timestamp when it is actually sent, because the HMS refuses frames more than
 60 s off its clock.
+
+The HMS clock is the reference: every frame from the HMS carries its time, so
+frames are stamped with our clock plus the last measured offset. A message the
+HMS refused only for its timestamp is queued again and resent.
 """
 
 import os
@@ -31,6 +35,7 @@ except ImportError:
 HEARTBEAT_PERIOD = 0.5
 AUTH_TIMEOUT = 0.5
 RECONNECT_DELAY = 1.0
+MAX_RESENDS = 3
 PROTOCOL = "1"
 SOFTWARE = "adc-2.0"
 FIRMWARE = "sim-hw-1.0"
@@ -48,6 +53,7 @@ class HmsComm:
         self._lock = threading.RLock()
         self._sock = None
         self._seq = 0
+        self._offset = 0.0              # HMS clock minus ours
         self._outbox = list(nvram.read("outbox", []))
         self._unacked = {}
         self._auth_waits = {}
@@ -184,7 +190,7 @@ class HmsComm:
             if self._sock is None:
                 return None
             self._seq += 1
-            data = self._codec.encode(Message(type_, self._id, self._seq, self._clock(), body))
+            data = self._codec.encode(Message(type_, self._id, self._seq, self._clock() + self._offset, body))
             try:
                 self._sock.sendall(data + b"\n")
                 return self._seq
@@ -225,6 +231,7 @@ class HmsComm:
         except (ChecksumError, FormatError, UnsupportedRevision) as e:
             self._say("bad frame from HMS: %r" % e)
             return
+        self._offset = msg.time - self._clock()
         b = msg.body
         if msg.type == "ACK":
             with self._lock:
@@ -232,12 +239,22 @@ class HmsComm:
                     self._save()
             return
         if msg.type == "NAK":
+            reason = b.get("reason", "")
             with self._lock:
                 item = self._unacked.pop(b.get("nak"), None)
-                if item is not None:
-                    self.refused.append({"message": item, "reason": b.get("reason", "")})
+                if item is None:
+                    if not reason.startswith("timestamp"):
+                        self._say("HMS refused a message: %s" % reason)
+                    return
+                if reason.startswith("timestamp") and item.get("resends", 0) < MAX_RESENDS:
+                    item["resends"] = item.get("resends", 0) + 1
+                    self._outbox.insert(0, item)
                     self._save()
-            self._say("HMS refused a message: %s" % b.get("reason", ""))
+                    self.syncQueue()
+                    return
+                self.refused.append({"message": item, "reason": reason})
+                self._save()
+            self._say("HMS refused a message: %s" % reason)
             return
         if msg.type == "AUTH_RESULT":
             waiter = self._auth_waits.get(b.get("request"))

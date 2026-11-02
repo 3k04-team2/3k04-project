@@ -12,6 +12,8 @@ MESSAGES = {
     "ACCESS_DENIED": "Access denied.",
     "LOGIN_WARNING": "Warning: {count} failed login attempts. The cabinet locks out after 5.",
     "HMS_UNREACHABLE": "Cannot reach the HMS to check the login. The cabinet stays locked.",
+    "SERVICE_UNREACHABLE": "Cannot reach the HMS to check the administrator or technician password. "
+                           "Reconnect the network and try again.",
     "ROLE_NOT_ALLOWED": "{role} accounts cannot open the cabinet. Use Reset or Disarm.",
     "LOCKED_OUT": "LOCKED OUT. An administrator or technician must reset the cabinet.",
     "MAINTENANCE": "Cabinet in maintenance mode.",
